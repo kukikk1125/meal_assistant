@@ -5,7 +5,7 @@ const ARK_BASE_URL = (process.env.ARK_BASE_URL || "https://ark.cn-beijing.volces
 const ARK_MODEL = process.env.ARK_MODEL || "doubao-seed-2-0-mini-260215";
 const REQUEST_TIMEOUT_MS = Number(process.env.AI_TIMEOUT_MS || 60_000);
 
-type ApiType = "parseText" | "parseImage" | "getSubstitutions" | "analyzeCooking" | "optimizeRecipe" | "chatSubstitution";
+type ApiType = "parseText" | "parseImage" | "getSubstitutions" | "analyzeCooking" | "optimizeRecipe" | "chatSubstitution" | "queryIngredientSubstitution";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -109,16 +109,20 @@ ${text}
 - 例如：盐 → ing_salt, 食用油 → ing_oil, 鸡蛋 → ing_egg
 - ID必须全小写，用下划线连接
 
-【3. 食材总量计算】
+【3. 食材总量计算（核心规则！）】
 - ingredients中的amount是该食材在整道菜中的总用量
-- 如果某食材在多个步骤中使用，需要累加所有步骤的用量
-- scalable字段： 主料和主要调料填true，装饰性食材填false
+- **重要：总用量 = 所有步骤中该食材用量之和**
+- 例如：葱在步骤1用5克，步骤2用10克，步骤3用5克，则总量为20克
+- 如果某食材在多个步骤中使用，必须累加所有步骤的用量
+- scalable字段：主料和主要调料填true，装饰性食材填false
 
-【4. 步骤食材用量】
+【4. 步骤食材用量（核心规则！）】
 - 每个步骤的ingredients数组列出该步骤实际使用的食材及用量
 - ingredientId必须对应ingredients中的id
-- amount是该步骤使用的具体用量
-- 如果步骤中未明确用量，根据常识估算
+- **amount是该步骤使用的具体用量，不是总量**
+- **关键：同一食材在多个步骤中的用量相加，必须等于ingredients中的总量**
+- 如果步骤中未明确用量，根据常识合理分配到各步骤
+- 例如：总量20克葱，分3个步骤使用，可以分配为：步骤1用5克，步骤2用10克，步骤3用5克
 
 【5. 步骤描述规则】
 - 步骤描述保持原样，不要添加或修改任何内容
@@ -246,16 +250,20 @@ ${text}
 - 例如：盐 → ing_salt, 食用油 → ing_oil, 鸡蛋 → ing_egg
 - ID必须全小写，用下划线连接
 
-【3. 食材总量计算】
+【3. 食材总量计算（核心规则！）】
 - ingredients中的amount是该食材在整道菜中的总用量
-- 如果某食材在多个步骤中使用，需要累加所有步骤的用量
-- scalable字段： 主料和主要调料填true，装饰性食材填false
+- **重要：总用量 = 所有步骤中该食材用量之和**
+- 例如：葱在步骤1用5克，步骤2用10克，步骤3用5克，则总量为20克
+- 如果某食材在多个步骤中使用，必须累加所有步骤的用量
+- scalable字段：主料和主要调料填true，装饰性食材填false
 
-【4. 步骤食材用量】
+【4. 步骤食材用量（核心规则！）】
 - 每个步骤的ingredients数组列出该步骤实际使用的食材及用量
 - ingredientId必须对应ingredients中的id
-- amount是该步骤使用的具体用量
-- 如果步骤中未明确用量，根据常识估算
+- **amount是该步骤使用的具体用量，不是总量**
+- **关键：同一食材在多个步骤中的用量相加，必须等于ingredients中的总量**
+- 如果步骤中未明确用量，根据常识合理分配到各步骤
+- 例如：总量20克葱，分3个步骤使用，可以分配为：步骤1用5克，步骤2用10克，步骤3用5克
 
 【5. 步骤描述规则】
 - 步骤描述保持原样，不要添加或修改任何内容
@@ -337,11 +345,14 @@ ${text}
 ====================
 优化规则：
 
-【1. 智能用量估算（优先）】
+【1. 智能用量估算（优先，核心！）】
 - 如果菜谱中没有食材分量，根据菜名 + 食材组合，给出合理的家常用量
 - 所有菜单都以**一人份**为标准配比
-- 主料按一人份合理估算（如：肉类100-150克，蔬菜200-300克）
-- 调料按一人份小剂量估算（如：盐2克，生抽15毫升）
+- **关键流程：先估算每个步骤的食材用量 → 再相加得到总量**
+- 步骤用量估算标准（一人份）：
+  - 主料：肉类100-150克，蔬菜200-300克（按步骤分配）
+  - 调料：盐2克，生抽15毫升（按步骤分配）
+- 例如：葱在步骤1爆炒用10克，步骤2装饰用5克，则总量为15克
 - 不得填0，必须给出合理数值
 
 【2. 食材ID生成规则】
@@ -349,16 +360,20 @@ ${text}
 - 例如：盐 → ing_salt, 食用油 → ing_oil, 鸡蛋 → ing_egg
 - ID必须全小写，用下划线连接
 
-【3. 食材总量计算】
+【3. 食材总量计算（核心规则！）】
 - ingredients中的amount是该食材在整道菜中的总用量
-- 如果某食材在多个步骤中使用，需要累加所有步骤的用量
-- scalable字段： 主料和主要调料填true，装饰性食材填false
+- **重要：总用量 = 所有步骤中该食材用量之和**
+- 例如：葱在步骤1用5克，步骤2用10克，步骤3用5克，则总量为20克
+- 如果某食材在多个步骤中使用，必须累加所有步骤的用量
+- scalable字段：主料和主要调料填true，装饰性食材填false
 
-【4. 步骤食材用量】
+【4. 步骤食材用量（核心规则！）】
 - 每个步骤的ingredients数组列出该步骤实际使用的食材及用量
 - ingredientId必须对应ingredients中的id
-- amount是该步骤使用的具体用量
+- **amount是该步骤使用的具体用量，不是总量**
+- **关键：同一食材在多个步骤中的用量相加，必须等于ingredients中的总量**
 - 合理分配食材用量到各个步骤
+- 例如：总量20克葱，分3个步骤使用，可以分配为：步骤1用5克，步骤2用10克，步骤3用5克
 
 【5. 单位标准化优化】
 - 将"少许/适量"转换为合理小剂量
@@ -508,6 +523,85 @@ ${text}
         },
       ] as Array<{ role: string; content: any }>;
     }
+    case "queryIngredientSubstitution": {
+      const recipeName = body.recipeName as string;
+      const ingredientName = body.ingredientName as string;
+      const currentAmount = body.currentAmount as string;
+      const allIngredients = body.allIngredients as string;
+      const userQuery = body.userQuery as string;
+      
+      return [
+        {
+          role: "system",
+          content: `你是"食材替换建议助手"。
+
+你的唯一职责是：基于当前菜谱，处理用户关于"食材替换、缺少食材、现有食材适配"的问题，并返回结构化结果。
+
+你不能回答以下类型的问题：
+- 烹饪步骤、时间、火候、技法
+- 营养、减肥、健康、孕妇、疾病相关
+- 通用厨房知识
+- 与当前菜谱无关的问题
+- 口味调整、少油少盐、辣度调整（除非用户明确是在问某个食材能否替换）
+
+如果用户问题不属于"食材替换咨询"，不要回答原问题，直接返回 out_of_scope 结果，并提示用户重新输入与食材替换相关的问题。`,
+        },
+        {
+          role: "user",
+          content: `输入信息：
+- 菜品名称：${recipeName}
+- 当前食材：${ingredientName} ${currentAmount}
+- 当前食谱食材列表：${allIngredients}
+- 用户问题：${userQuery}
+
+请先判断用户问题是否属于以下范围：
+1. 缺少某个食材，询问可以换什么
+2. 不吃某个食材，询问如何替换
+3. 家里只有现有食材，询问可用什么替代
+4. 询问某个具体食材能否不用或换成别的
+5. 询问某个食材的替代品（价格、购买难度、口味等）
+
+如果属于以上范围，返回 success；
+如果不属于，返回 out_of_scope。
+
+输出要求：
+- 只返回 JSON
+- 不要输出任何额外解释文字
+- 根据用户问题的具体程度返回建议数量：
+  * 如果是通用问题（如"没有这个食材可以换什么"），返回最多3个替换建议
+  * 如果是具体问题（如"家里只有XX能用吗"、"这个食材太贵了有便宜的吗"），返回1-3个针对性建议
+- 替换建议应尽量适合当前菜谱
+- 不推荐明显不合理或罕见的替换
+
+返回格式如下：
+
+如果问题属于食材替换范围：
+{
+  "status": "success",
+  "message": "找到以下可参考的替换方案",
+  "suggestions": [
+    {
+      "name": "替换食材名",
+      "amount": "建议用量，可为空",
+      "type": "same_category | functional | taste",
+      "reason": "替换原因，20字以内",
+      "impact": "low | medium | high",
+      "notes": "如有必要，补充1句提醒"
+    }
+  ]
+}
+
+如果问题不属于食材替换范围：
+{
+  "status": "out_of_scope",
+  "message": "当前窗口仅支持食材替换相关问题，请输入例如"没有料酒可以换什么"这类问题。",
+  "suggestions": []
+}
+
+现在请返回JSON：`,
+        },
+      ];
+    }
     default:
       return [];
   }
@@ -532,7 +626,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!type || !["parseText", "parseImage", "getSubstitutions", "analyzeCooking", "optimizeRecipe", "chatSubstitution"].includes(type)) {
+    if (!type || !["parseText", "parseImage", "getSubstitutions", "analyzeCooking", "optimizeRecipe", "chatSubstitution", "queryIngredientSubstitution"].includes(type)) {
       return NextResponse.json({ error: { code: "INVALID_TYPE", message: "Invalid type" } }, { status: 400 });
     }
 

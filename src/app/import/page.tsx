@@ -67,6 +67,7 @@ interface ManualStep {
   duration: number;
   timeUnit: string;
   ingredients: ManualStepIngredient[];
+  relatedIngredients?: string[];
 }
 
 export default function ImportPage() {
@@ -90,7 +91,7 @@ export default function ImportPage() {
     name: "",
     totalTime: 15,
     ingredients: [{ name: "", amount: 1, unit: "个" }] as ManualIngredient[],
-    steps: [{ order: 1, description: "", duration: 5, timeUnit: "分钟", ingredients: [] as ManualStepIngredient[] }] as ManualStep[],
+    steps: [{ order: 1, description: "", duration: 5, timeUnit: "分钟", ingredients: [] as ManualStepIngredient[], relatedIngredients: [] as string[] }] as ManualStep[],
   });
 
   const [showUnitPicker, setShowUnitPicker] = useState<number | null>(null);
@@ -216,8 +217,8 @@ export default function ImportPage() {
         name: recipeToSave.name,
         total_time: recipeToSave.totalTime,
         servings: 2,
-        ingredients: recipeToSave.ingredients.map((ing) => ({
-          id: ing.id || `ing-${Math.random().toString(36).substr(2, 9)}`,
+        ingredients: recipeToSave.ingredients.map((ing, index) => ({
+          id: `ing-${index}-${Math.random().toString(36).substr(2, 9)}`,
           name: ing.name,
           amount: ing.amount,
           unit: ing.unit,
@@ -287,7 +288,7 @@ export default function ImportPage() {
   function addStep() {
     setManualRecipe(prev => ({
       ...prev,
-      steps: [...prev.steps, { order: prev.steps.length + 1, description: "", duration: 5, timeUnit: "分钟", ingredients: [] }],
+      steps: [...prev.steps, { order: prev.steps.length + 1, description: "", duration: 5, timeUnit: "分钟", ingredients: [], relatedIngredients: [] }],
     }));
   }
 
@@ -760,16 +761,16 @@ export default function ImportPage() {
                                   i === index
                                     ? {
                                         ...s,
-                                        relatedIngredients: s.relatedIngredients.includes(ing.name)
-                                          ? s.relatedIngredients.filter(n => n !== ing.name)
-                                          : [...s.relatedIngredients, ing.name]
+                                        relatedIngredients: (s.relatedIngredients || []).includes(ing.name)
+                                          ? (s.relatedIngredients || []).filter(n => n !== ing.name)
+                                          : [...(s.relatedIngredients || []), ing.name]
                                       }
                                     : s
                                 ),
                               }));
                             }}
                             className={`px-2 py-1 rounded-full text-xs transition-colors ${
-                              step.relatedIngredients.includes(ing.name)
+                              (step.relatedIngredients || []).includes(ing.name)
                                 ? "bg-primary-500 text-white"
                                 : "bg-gray-100 text-gray-600 hover:bg-gray-200"
                             }`}

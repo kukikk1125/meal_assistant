@@ -60,6 +60,10 @@ export interface CookingLog {
   apply_to_recipe: boolean;
   cooked_at: string;
   images?: string[];
+  taste_feedback?: string[];
+  difficulty_feedback?: string[];
+  notes?: string;
+  used_version?: "original" | "my";
 }
 
 const LOCAL_STORAGE_RECIPES_KEY = 'meal_assistant_recipes';

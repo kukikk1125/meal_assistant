@@ -4,16 +4,19 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { Plus, Search, Clock, Star } from "lucide-react";
 import { getRecipes, Recipe, getCookingLogs, calculateAverageRating } from "@/lib/supabase";
+import { useRecipeStore } from "@/store";
 
 export default function HomePage() {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [ratings, setRatings] = useState<Record<string, { avg: number; count: number }>>({});
+  const { clearTempAdjustments } = useRecipeStore();
 
   useEffect(() => {
+    clearTempAdjustments();
     loadRecipes();
-  }, []);
+  }, [clearTempAdjustments]);
 
   async function loadRecipes() {
     try {

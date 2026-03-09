@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿export interface ParsedRecipe {
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿export interface ParsedRecipe {
   name: string;
   totalTime: number;
   ingredients: {
@@ -17,6 +17,7 @@
       amount: number;
       unit: string;
     }[];
+    relatedIngredients?: string[];
   }[];
 }
 
@@ -664,4 +665,67 @@ export async function textToSpeech(text: string): Promise<ArrayBuffer> {
   }
 
   return response.arrayBuffer();
+}
+
+export interface IngredientSubstitutionSuggestion {
+  name: string;
+  amount: string;
+  type: "same_category" | "functional" | "taste";
+  reason: string;
+  impact: "low" | "medium" | "high";
+  notes?: string;
+}
+
+export interface IngredientSubstitutionQueryResult {
+  status: "success" | "out_of_scope";
+  message: string;
+  suggestions: IngredientSubstitutionSuggestion[];
+}
+
+export async function queryIngredientSubstitution(
+  recipeName: string,
+  ingredientName: string,
+  currentAmount: string,
+  allIngredients: string,
+  userQuery: string
+): Promise<IngredientSubstitutionQueryResult> {
+  try {
+    const result = await callAI("queryIngredientSubstitution", {
+      recipeName,
+      ingredientName,
+      currentAmount,
+      allIngredients,
+      userQuery,
+    });
+    
+    const jsonMatch = result.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      return {
+        status: "out_of_scope",
+        message: "无法解析AI响应，请重试",
+        suggestions: [],
+      };
+    }
+    
+    const parsed = JSON.parse(jsonMatch[0]);
+    return {
+      status: parsed.status || "out_of_scope",
+      message: parsed.message || "",
+      suggestions: (parsed.suggestions || []).map((s: any) => ({
+        name: s.name || "",
+        amount: s.amount || "",
+        type: s.type || "same_category",
+        reason: s.reason || "",
+        impact: s.impact || "low",
+        notes: s.notes,
+      })),
+    };
+  } catch (error) {
+    console.error("Failed to query ingredient substitution:", error);
+    return {
+      status: "out_of_scope",
+      message: "查询失败，请重试",
+      suggestions: [],
+    };
+  }
 }
