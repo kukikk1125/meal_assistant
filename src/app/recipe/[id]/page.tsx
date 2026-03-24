@@ -5,11 +5,13 @@ import Link from "next/link";
 import { useRouter, useParams } from "next/navigation";
 import { 
   ArrowLeft, Clock, Play, X, Check, MoreVertical, Edit2, Trash2, BookOpen, Star, 
-  Sparkles, RefreshCw, AlertCircle, Send
+  Sparkles, RefreshCw, AlertCircle, Send, ChevronUp, ChevronDown
 } from "lucide-react";
-import { getRecipe, deleteRecipe, Recipe, Ingredient, getCookingLogs, calculateAverageRating } from "@/lib/supabase";
+import { getRecipe, deleteRecipe, Recipe, Ingredient, getCookingLogs, calculateAverageRating, CookingLog } from "@/lib/supabase";
+import { getOptimizedRecipe } from "@/lib/recipe-adjustment-service";
 import { queryIngredientSubstitution, IngredientSubstitutionQueryResult, IngredientSubstitutionSuggestion } from "@/lib/doubao";
 import { useRecipeStore, useCookingStore } from "@/store";
+import AIProactiveTip from "@/components/AIProactiveTip";
 
 interface SubstitutionHistoryItem {
   id: string;
@@ -66,6 +68,7 @@ export default function RecipeDetailPage() {
   const [deleting, setDeleting] = useState(false);
   const [averageRating, setAverageRating] = useState(0);
   const [logCount, setLogCount] = useState(0);
+  const [cookingLogs, setCookingLogs] = useState<CookingLog[]>([]);
   
   const [showIngredientAction, setShowIngredientAction] = useState<Ingredient | null>(null);
   const [queryStatus, setQueryStatus] = useState<QueryStatus>("idle");
@@ -75,6 +78,10 @@ export default function RecipeDetailPage() {
   
   const [hasMyVersion, setHasMyVersion] = useState(false);
   const [currentVersion, setCurrentVersion] = useState<"original" | "my">("original");
+  const [myVersionSummary, setMyVersionSummary] = useState<string | undefined>();
+  const [myVersionRecipe, setMyVersionRecipe] = useState<Recipe | null>(null);
+  const [originalRecipe, setOriginalRecipe] = useState<Recipe | null>(null);
+  const [showOptimizationDetails, setShowOptimizationDetails] = useState(false);
   
   const lastLoadedRecipeId = useRef<string | null>(null);
 
@@ -88,13 +95,47 @@ export default function RecipeDetailPage() {
       const recipe = await getRecipe(recipeId);
       
       setCurrentRecipe(recipe);
+      setOriginalRecipe(recipe);
       
       const logs = await getCookingLogs(recipeId);
+      setCookingLogs(logs);
       setAverageRating(calculateAverageRating(logs));
       setLogCount(logs.length);
       
-      const savedVersion = localStorage.getItem(`my-version-${recipeId}`);
-      setHasMyVersion(!!savedVersion);
+      const optimizedVersion = await getOptimizedRecipe(recipeId);
+      setHasMyVersion(!!optimizedVersion);
+      if (optimizedVersion) {
+        setMyVersionSummary(optimizedVersion.adjustment_summary);
+        const mappedIngredients = optimizedVersion.ingredients.map((ing) => ({
+          id: ing.id,
+          name: ing.name,
+          amount: ing.adjusted_amount ?? 0,
+          unit: ing.adjusted_unit ?? "",
+        }));
+        
+        const mappedSteps = optimizedVersion.steps.map((step) => ({
+          order: step.order,
+          description: step.description,
+          duration: step.duration,
+          ingredients: step.ingredients,
+          tip: step.tip,
+        }));
+        
+        const myVersionRecipeData: Recipe = {
+          id: recipeId,
+          name: optimizedVersion.name,
+          total_time: optimizedVersion.total_time,
+          ingredients: mappedIngredients,
+          steps: mappedSteps,
+          image_url: recipe.image_url,
+          user_id: recipe.user_id,
+          created_at: recipe.created_at,
+        };
+        
+        setMyVersionRecipe(myVersionRecipeData);
+        setCurrentRecipe(myVersionRecipeData);
+        setCurrentVersion("my");
+      }
     } catch (error) {
       console.error("Failed to load recipe:", error);
     } finally {
@@ -122,9 +163,25 @@ export default function RecipeDetailPage() {
     }
   }
 
+  function getDisplayRecipe(): Recipe {
+    if (currentVersion === "my" && myVersionRecipe) {
+      return myVersionRecipe;
+    }
+    return currentRecipe;
+  }
+
+  function handleVersionChange(version: "original" | "my") {
+    setCurrentVersion(version);
+    
+    if (version === "my" && myVersionRecipe) {
+      setCurrentRecipe(myVersionRecipe);
+    } else if (version === "original" && originalRecipe) {
+      setCurrentRecipe(originalRecipe);
+    }
+  }
+
   function handleStartCooking() {
     setCurrentStepIndex(0);
-    clearSubstitutions();
     
     if (sessionRecipe && sessionRecipe.steps.length > 0) {
       resetTimer(sessionRecipe.steps[0].duration * 60);
@@ -152,6 +209,42 @@ export default function RecipeDetailPage() {
     router.push(`/recipe/${recipeId}/edit`);
     setShowMenu(false);
   }
+
+  function analyzeFailedLogs() {
+    const failedLogs = cookingLogs.filter(log => log.rating <= 2);
+    if (failedLogs.length === 0) return null;
+    
+    const lastFailedLog = failedLogs[failedLogs.length - 1];
+    const allIssues: string[] = [];
+    
+    failedLogs.forEach(log => {
+      if (log.taste_feedback) {
+        allIssues.push(...log.taste_feedback);
+      }
+      if (log.difficulty_feedback) {
+        allIssues.push(...log.difficulty_feedback);
+      }
+    });
+    
+    const issueCount: Record<string, number> = {};
+    allIssues.forEach(issue => {
+      issueCount[issue] = (issueCount[issue] || 0) + 1;
+    });
+    
+    const topIssues = Object.entries(issueCount)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([issue]) => issue);
+    
+    return {
+      lastFailedLog,
+      failedCount: failedLogs.length,
+      topIssues,
+      hasOptimizedVersion: hasMyVersion,
+    };
+  }
+
+  const failedLogAnalysis = analyzeFailedLogs();
 
   function handleOpenIngredientAction(ingredient: Ingredient) {
     setShowIngredientAction(ingredient);
@@ -367,11 +460,13 @@ export default function RecipeDetailPage() {
       <div className="px-4 -mt-8 relative">
         <div className="card p-4">
           <div className="flex items-start justify-between">
-            <h1 className="text-2xl font-bold flex-1">{currentRecipe.name}</h1>
+            <h1 className="text-2xl font-bold flex-1">
+              {getDisplayRecipe().name}
+            </h1>
             {hasMyVersion && (
               <div className="flex bg-gray-100 rounded-lg p-0.5 ml-2">
                 <button
-                  onClick={() => setCurrentVersion("original")}
+                  onClick={() => handleVersionChange("original")}
                   className={`px-2 py-1 text-xs rounded-md transition-colors ${
                     currentVersion === "original" ? "bg-white shadow text-gray-900" : "text-gray-500"
                   }`}
@@ -379,7 +474,7 @@ export default function RecipeDetailPage() {
                   原始
                 </button>
                 <button
-                  onClick={() => setCurrentVersion("my")}
+                  onClick={() => handleVersionChange("my")}
                   className={`px-2 py-1 text-xs rounded-md transition-colors ${
                     currentVersion === "my" ? "bg-primary-500 text-white" : "text-gray-500"
                   }`}
@@ -389,10 +484,38 @@ export default function RecipeDetailPage() {
               </div>
             )}
           </div>
+          {currentVersion === "my" && myVersionSummary && (
+            <div className="mt-2">
+              <button
+                onClick={() => setShowOptimizationDetails(!showOptimizationDetails)}
+                className="flex items-center gap-1 text-xs text-primary-600 hover:text-primary-700"
+              >
+                {showOptimizationDetails ? (
+                  <>
+                    <ChevronUp className="w-3 h-3" />
+                    收起优化说明
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown className="w-3 h-3" />
+                    查看优化说明
+                  </>
+                )}
+              </button>
+              {showOptimizationDetails && (
+                <div className="mt-2 p-2 bg-primary-50 rounded-lg">
+                  <p className="text-xs text-primary-700">
+                    <span className="font-medium">优化说明：</span>
+                    {myVersionSummary}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
           <div className="flex items-center gap-4 mt-2 text-gray-500">
             <div className="flex items-center gap-1">
               <Clock className="w-4 h-4" />
-              <span>{currentRecipe.total_time} 分钟</span>
+              <span>{getDisplayRecipe().total_time} 分钟</span>
             </div>
             {logCount > 0 && (
               <div className="flex items-center gap-1">
@@ -403,6 +526,21 @@ export default function RecipeDetailPage() {
             )}
           </div>
         </div>
+      </div>
+
+      <div className="px-4 mt-4">
+        <AIProactiveTip
+          recipeId={recipeId}
+          recipe={{
+            name: currentRecipe?.name || "",
+            totalTime: currentRecipe?.total_time || 0,
+            ingredients: currentRecipe?.ingredients || [],
+            steps: currentRecipe?.steps || [],
+          }}
+          cookingLogs={cookingLogs}
+          hasOptimizedVersion={hasMyVersion}
+          onGenerateOptimized={() => router.push(`/recipe/${recipeId}/adjust`)}
+        />
       </div>
 
       <div className="px-4 mt-6">

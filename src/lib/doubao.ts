@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿export interface ParsedRecipe {
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿export interface ParsedRecipe {
   name: string;
   totalTime: number;
   ingredients: {
@@ -35,6 +35,21 @@ export interface CookingAdvice {
   status: string;
   suggestion: string;
   warning?: string;
+}
+
+export interface PhotoCheckAnalysisResult {
+  overallStatus: "good" | "warning" | "problem" | "unclear";
+  statusLabel: string;
+  currentState: string;
+  isAppropriate: boolean;
+  canProceed: boolean;
+  problemType: "none" | "heat" | "texture" | "color" | "doneness" | "seasoning" | "mixing" | "moisture" | "plating" | "unclear";
+  confidence: "high" | "medium" | "low";
+  reasons: string[];
+  risks: string[];
+  advice: string;
+  remedy: string;
+  followUpShotSuggestion?: string;
 }
 
 export interface PersonalizedAdvice {
@@ -369,12 +384,25 @@ export async function getIngredientSubstitutions(
 export async function analyzeCookingImage(
   imageBase64: string,
   currentStep: string,
-  stepNumber: number
-): Promise<CookingAdvice> {
+  stepNumber: number,
+  recipeName?: string,
+  prevStep?: string,
+  nextStep?: string
+): Promise<PhotoCheckAnalysisResult> {
   if (USE_MOCK_DATA) {
     return {
-      status: "烹饪中",
-      suggestion: "继续按当前步骤操作，注意火候变化",
+      overallStatus: "good",
+      statusLabel: "状态正常",
+      currentState: "食材正在锅中翻炒，表面微微上色",
+      isAppropriate: true,
+      canProceed: true,
+      problemType: "none",
+      confidence: "high",
+      reasons: ["食材颜色均匀", "表面有适当焦化"],
+      risks: [],
+      advice: "可以继续下一步操作",
+      remedy: "",
+      followUpShotSuggestion: "",
     };
   }
 
@@ -383,12 +411,44 @@ export async function analyzeCookingImage(
       content: imageBase64,
       currentStep,
       stepNumber,
+      recipeName,
+      prevStep,
+      nextStep,
     });
     const jsonMatch = result.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error("invalid");
-    return JSON.parse(jsonMatch[0]) as CookingAdvice;
+    if (!jsonMatch) throw new Error("invalid JSON");
+    
+    const parsed = JSON.parse(jsonMatch[0]);
+    
+    return {
+      overallStatus: parsed.overallStatus || "unclear",
+      statusLabel: parsed.statusLabel || "无法判断",
+      currentState: parsed.currentState || "无法识别当前状态",
+      isAppropriate: parsed.isAppropriate ?? true,
+      canProceed: parsed.canProceed ?? true,
+      problemType: parsed.problemType || "unclear",
+      confidence: parsed.confidence || "low",
+      reasons: Array.isArray(parsed.reasons) ? parsed.reasons : [],
+      risks: Array.isArray(parsed.risks) ? parsed.risks : [],
+      advice: parsed.advice || "请继续按步骤操作",
+      remedy: parsed.remedy || "",
+      followUpShotSuggestion: parsed.followUpShotSuggestion || "",
+    };
   } catch {
-    return { status: "无法识别", suggestion: "请继续按步骤操作" };
+    return {
+      overallStatus: "unclear",
+      statusLabel: "无法判断",
+      currentState: "无法识别当前状态",
+      isAppropriate: true,
+      canProceed: true,
+      problemType: "unclear",
+      confidence: "low",
+      reasons: [],
+      risks: [],
+      advice: "请继续按步骤操作",
+      remedy: "",
+      followUpShotSuggestion: "建议重新拍摄，确保光线充足、画面清晰",
+    };
   }
 }
 
@@ -452,6 +512,256 @@ export async function optimizeRecipe(recipe: ParsedRecipe): Promise<ParsedRecipe
     return JSON.parse(extractJSON(result)) as ParsedRecipe;
   } catch {
     throw new Error("模型返回内容不是有效的 JSON");
+  }
+}
+
+export interface OptimizedRecipeFromLogs {
+  name: string;
+  totalTime: number;
+  ingredients: {
+    id: string;
+    name: string;
+    original_amount?: number;
+    original_unit?: string;
+    adjusted_amount: number;
+    adjusted_unit: string;
+    scalable?: boolean;
+    change_reason?: string;
+  }[];
+  steps: {
+    order: number;
+    description: string;
+    duration: number;
+    ingredients?: {
+      ingredientId: string;
+      name: string;
+      amount: number;
+      unit: string;
+    }[];
+    tip?: string;
+    changes?: string[];
+  }[];
+  adjustmentSummary: string;
+}
+
+export async function optimizeRecipeFromLogs(
+  recipe: { 
+    name: string; 
+    totalTime: number;
+    ingredients: Array<{ id: string; name: string; amount: number; unit: string; scalable?: boolean }>;
+    steps: Array<{ order: number; description: string; duration: number; ingredients?: Array<{ ingredientId: string; name: string; amount: number; unit: string }>; tip?: string }>;
+  },
+  cookingLogs: Array<{
+    rating: number;
+    taste_feedback?: string[];
+    difficulty_feedback?: string[];
+    notes?: string;
+  }>
+): Promise<OptimizedRecipeFromLogs> {
+  const result = await callAI("optimizeRecipeFromLogs", { recipe, cookingLogs });
+  try {
+    return JSON.parse(extractJSON(result)) as OptimizedRecipeFromLogs;
+  } catch {
+    throw new Error("模型返回内容不是有效的 JSON");
+  }
+}
+
+export interface CookingLogAnalysis {
+  should_generate_optimized_version: boolean;
+  confidence: "high" | "medium" | "low";
+  is_positive?: boolean;
+  
+  summary: {
+    title: string;
+    text: string;
+  };
+  
+  problems: Array<{
+    code: string;
+    label: string;
+    evidence_strength: "high" | "medium" | "low";
+    category: "stable" | "occasional";
+    likely_causes?: string[];
+  }>;
+  
+  preferences: Array<{
+    code: string;
+    label: string;
+    type: "flavor" | "texture" | "other";
+    evidence_strength: "high" | "medium" | "low";
+  }>;
+  
+  suggestions: Array<{
+    title: string;
+    detail: string;
+    priority: "high" | "medium" | "low";
+  }>;
+  
+  praise?: {
+    title: string;
+    text: string;
+  };
+  
+  share_text?: string;
+  
+  adjustment_direction: {
+    flavor_profile?: string;
+    ingredient_adjustment?: string[];
+    heat_adjustment?: string[];
+    step_optimization?: string[];
+  };
+  
+  generation_reason: string;
+  
+  ui_recommendation: {
+    primary_button_text: string;
+    secondary_button_text: string;
+    show_share?: boolean;
+  };
+}
+
+export async function analyzeCookingLog(
+  recipe: {
+    name: string;
+    ingredients: Array<{ id: string; name: string; amount: number; unit: string }>;
+    steps: Array<{ order: number; description: string; duration: number }>;
+  },
+  currentLog: {
+    cookTime?: string;
+    rating: number;
+    taste_feedback?: string[];
+    difficulty_feedback?: string[];
+    notes?: string;
+    servingAdjustment?: string;
+    ingredientReplacements?: string;
+  }
+): Promise<CookingLogAnalysis> {
+  const result = await callAI("analyzeCookingLog", { recipe, currentLog });
+  try {
+    const jsonStr = extractJSON(result);
+    const parsed = JSON.parse(jsonStr);
+    
+    if (!parsed.suggestions) {
+      parsed.suggestions = [];
+    }
+    if (!parsed.problems) {
+      parsed.problems = [];
+    }
+    if (!parsed.preferences) {
+      parsed.preferences = [];
+    }
+    if (!parsed.summary) {
+      parsed.summary = { title: "分析结果", text: "" };
+    }
+    if (!parsed.ui_recommendation) {
+      parsed.ui_recommendation = {
+        primary_button_text: "根据这次问题生成改良版",
+        secondary_button_text: "先查看优化建议"
+      };
+    }
+    
+    return parsed as CookingLogAnalysis;
+  } catch (e) {
+    console.error("Failed to parse analyzeCookingLog result:", result);
+    throw new Error("模型返回内容不是有效的 JSON: " + (e instanceof Error ? e.message : String(e)));
+  }
+}
+
+export interface CookingHistoryAnalysis {
+  should_generate_optimized_version: boolean;
+  confidence: "high" | "medium" | "low";
+  analysis_stability: "high" | "medium" | "low";
+  history_count: number;
+  
+  summary: {
+    title: string;
+    text: string;
+  };
+  
+  problems: Array<{
+    code: string;
+    label: string;
+    frequency?: number;
+    evidence_strength: "high" | "medium" | "low";
+    category: "stable" | "occasional";
+  }>;
+  
+  preferences: Array<{
+    code: string;
+    label: string;
+    type: "flavor" | "texture" | "other";
+    evidence_strength: "high" | "medium" | "low";
+  }>;
+  
+  suggestions: Array<{
+    title: string;
+    detail: string;
+    priority: "high" | "medium" | "low";
+  }>;
+  
+  adjustment_direction: {
+    flavor_profile?: string;
+    ingredient_adjustment?: string[];
+    heat_adjustment?: string[];
+    step_optimization?: string[];
+  };
+  
+  generation_reason: string;
+  
+  ui_recommendation: {
+    primary_button_text: string;
+    secondary_button_text: string;
+  };
+}
+
+export async function analyzeCookingHistory(
+  recipe: {
+    name: string;
+    ingredients: Array<{ id: string; name: string; amount: number; unit: string }>;
+    steps: Array<{ order: number; description: string; duration: number }>;
+  },
+  historyRecords: Array<{
+    cookTime?: string;
+    rating: number;
+    taste_feedback?: string[];
+    difficulty_feedback?: string[];
+    notes?: string;
+    servingAdjustment?: string;
+    ingredientReplacements?: string;
+  }>
+): Promise<CookingHistoryAnalysis> {
+  const result = await callAI("analyzeCookingHistory", { 
+    recipe, 
+    historyRecords, 
+    historyCount: historyRecords.length 
+  });
+  try {
+    const jsonStr = extractJSON(result);
+    const parsed = JSON.parse(jsonStr);
+    
+    if (!parsed.suggestions) {
+      parsed.suggestions = [];
+    }
+    if (!parsed.problems) {
+      parsed.problems = [];
+    }
+    if (!parsed.preferences) {
+      parsed.preferences = [];
+    }
+    if (!parsed.summary) {
+      parsed.summary = { title: "分析结果", text: "" };
+    }
+    if (!parsed.ui_recommendation) {
+      parsed.ui_recommendation = {
+        primary_button_text: "基于历史记录生成长期优化版",
+        secondary_button_text: "查看我的复盘总结"
+      };
+    }
+    
+    return parsed as CookingHistoryAnalysis;
+  } catch (e) {
+    console.error("Failed to parse analyzeCookingHistory result:", result);
+    throw new Error("模型返回内容不是有效的 JSON: " + (e instanceof Error ? e.message : String(e)));
   }
 }
 

@@ -67,7 +67,6 @@ interface ManualStep {
   duration: number;
   timeUnit: string;
   ingredients: ManualStepIngredient[];
-  relatedIngredients?: string[];
 }
 
 export default function ImportPage() {
@@ -91,7 +90,7 @@ export default function ImportPage() {
     name: "",
     totalTime: 15,
     ingredients: [{ name: "", amount: 1, unit: "个" }] as ManualIngredient[],
-    steps: [{ order: 1, description: "", duration: 5, timeUnit: "分钟", ingredients: [] as ManualStepIngredient[], relatedIngredients: [] as string[] }] as ManualStep[],
+    steps: [{ order: 1, description: "", duration: 5, timeUnit: "分钟", ingredients: [] as ManualStepIngredient[] }] as ManualStep[],
   });
 
   const [showUnitPicker, setShowUnitPicker] = useState<number | null>(null);
@@ -288,7 +287,7 @@ export default function ImportPage() {
   function addStep() {
     setManualRecipe(prev => ({
       ...prev,
-      steps: [...prev.steps, { order: prev.steps.length + 1, description: "", duration: 5, timeUnit: "分钟", ingredients: [], relatedIngredients: [] }],
+      steps: [...prev.steps, { order: prev.steps.length + 1, description: "", duration: 5, timeUnit: "分钟", ingredients: [] }],
     }));
   }
 
@@ -750,35 +749,121 @@ export default function ImportPage() {
                       </div>
                       <div className="flex flex-wrap gap-2">
                         <span className="text-sm text-gray-500">所需食材：</span>
-                        {manualRecipe.ingredients.filter(ing => ing.name).map((ing) => (
-                          <button
-                            key={ing.name}
-                            type="button"
-                            onClick={() => {
-                              setManualRecipe(prev => ({
-                                ...prev,
-                                steps: prev.steps.map((s, i) =>
-                                  i === index
-                                    ? {
-                                        ...s,
-                                        relatedIngredients: (s.relatedIngredients || []).includes(ing.name)
-                                          ? (s.relatedIngredients || []).filter(n => n !== ing.name)
-                                          : [...(s.relatedIngredients || []), ing.name]
-                                      }
-                                    : s
-                                ),
-                              }));
-                            }}
-                            className={`px-2 py-1 rounded-full text-xs transition-colors ${
-                              (step.relatedIngredients || []).includes(ing.name)
-                                ? "bg-primary-500 text-white"
-                                : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                            }`}
-                          >
-                            {ing.name}
-                          </button>
-                        ))}
+                        {manualRecipe.ingredients.filter(ing => ing.name).map((ing) => {
+                          const isSelected = (step.ingredients || []).some(
+                            stepIng => stepIng.ingredientId === `ing-${manualRecipe.ingredients.indexOf(ing)}`
+                          );
+                          return (
+                            <button
+                              key={ing.name}
+                              type="button"
+                              onClick={() => {
+                                const ingIndex = manualRecipe.ingredients.indexOf(ing);
+                                const ingId = `ing-${ingIndex}`;
+                                setManualRecipe(prev => {
+                                  const currentStep = prev.steps[index];
+                                  const existingIngIndex = (currentStep.ingredients || []).findIndex(
+                                    i => i.ingredientId === ingId
+                                  );
+                                  
+                                  let newIngredients: ManualStepIngredient[];
+                                  if (existingIngIndex >= 0) {
+                                    newIngredients = (currentStep.ingredients || []).filter(
+                                      i => i.ingredientId !== ingId
+                                    );
+                                  } else {
+                                    newIngredients = [...(currentStep.ingredients || []), {
+                                      ingredientId: ingId,
+                                      name: ing.name,
+                                      amount: ing.amount,
+                                      unit: ing.unit,
+                                    }];
+                                  }
+                                  
+                                  return {
+                                    ...prev,
+                                    steps: prev.steps.map((s, i) =>
+                                      i === index ? { ...s, ingredients: newIngredients } : s
+                                    ),
+                                  };
+                                });
+                              }}
+                              className={`px-2 py-1 rounded-full text-xs transition-colors ${
+                                isSelected
+                                  ? "bg-primary-500 text-white"
+                                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                              }`}
+                            >
+                              {ing.name}
+                            </button>
+                          );
+                        })}
                       </div>
+                      {(step.ingredients || []).length > 0 && (
+                        <div className="space-y-2 mt-2 pt-2 border-t border-gray-100">
+                          <span className="text-xs text-gray-400">设置各食材用量：</span>
+                          {(step.ingredients || []).map((stepIng, ingIdx) => {
+                            const originalIng = manualRecipe.ingredients.find(
+                              (_, i) => `ing-${i}` === stepIng.ingredientId
+                            );
+                            return (
+                              <div key={stepIng.ingredientId} className="flex items-center gap-2">
+                                <span className="text-xs text-gray-600 w-20 truncate">{stepIng.name}</span>
+                                <input
+                                  type="number"
+                                  value={stepIng.amount}
+                                  onChange={(e) => {
+                                    setManualRecipe(prev => ({
+                                      ...prev,
+                                      steps: prev.steps.map((s, i) =>
+                                        i === index
+                                          ? {
+                                              ...s,
+                                              ingredients: (s.ingredients || []).map((ing, idx) =>
+                                                idx === ingIdx
+                                                  ? { ...ing, amount: parseFloat(e.target.value) || 0 }
+                                                  : ing
+                                              ),
+                                            }
+                                          : s
+                                      ),
+                                    }));
+                                  }}
+                                  className="w-16 px-2 py-1 bg-gray-100 rounded-lg text-xs text-center"
+                                />
+                                <select
+                                  value={stepIng.unit}
+                                  onChange={(e) => {
+                                    setManualRecipe(prev => ({
+                                      ...prev,
+                                      steps: prev.steps.map((s, i) =>
+                                        i === index
+                                          ? {
+                                              ...s,
+                                              ingredients: (s.ingredients || []).map((ing, idx) =>
+                                                idx === ingIdx ? { ...ing, unit: e.target.value } : ing
+                                              ),
+                                            }
+                                          : s
+                                      ),
+                                    }));
+                                  }}
+                                  className="px-2 py-1 bg-gray-100 rounded-lg text-xs"
+                                >
+                                  {INGREDIENT_UNITS.map(u => (
+                                    <option key={u.value} value={u.value}>{u.label}</option>
+                                  ))}
+                                </select>
+                                {originalIng && (
+                                  <span className="text-xs text-gray-400">
+                                    (总量: {originalIng.amount}{originalIng.unit})
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                     {manualRecipe.steps.length > 1 && (
                       <button onClick={() => removeStep(index)} className="text-red-500 p-2 flex-shrink-0 mt-2">
@@ -1165,7 +1250,7 @@ export default function ImportPage() {
                 <button
                   onClick={() => setEditingRecipe({
                     ...editingRecipe,
-                    steps: [...editingRecipe.steps, { order: editingRecipe.steps.length + 1, description: "", duration: 0, relatedIngredients: [] }]
+                    steps: [...editingRecipe.steps, { order: editingRecipe.steps.length + 1, description: "", duration: 0, ingredients: [] }]
                   })}
                   className="text-primary-500 text-sm"
                 >

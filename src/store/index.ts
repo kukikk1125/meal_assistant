@@ -123,13 +123,11 @@ function computeSessionRecipe(currentRecipe: Recipe | null, tempAdjustments: Tem
     
     const updatedStepIngredients = filteredStepIngredients.map(stepIng => {
       const replacement = replacedNames.get(stepIng.ingredientId);
-      if (replacement) {
-        return {
-          ...stepIng,
-          name: replacement,
-        };
-      }
-      return stepIng;
+      return {
+        ...stepIng,
+        name: replacement || stepIng.name,
+        amount: Math.round(stepIng.amount * scaleFactor * 10) / 10,
+      };
     });
     
     return {
@@ -159,10 +157,18 @@ export const useRecipeStore = create<RecipeState>((set, get) => ({
     set((state) => {
       const isDifferentRecipe = state.currentRecipe?.id !== recipe?.id;
       const newAdjustments = isDifferentRecipe ? [] : state.tempAdjustments;
-      const newSessionRecipe = computeSessionRecipe(recipe, newAdjustments, isDifferentRecipe ? 1 : state.scaleFactor);
+      const newScaleFactor = isDifferentRecipe ? 1 : state.scaleFactor;
+      
+      console.log("=== setCurrentRecipe ===");
+      console.log("isDifferentRecipe:", isDifferentRecipe);
+      console.log("state.tempAdjustments:", state.tempAdjustments);
+      console.log("newAdjustments:", newAdjustments);
+      console.log("newScaleFactor:", newScaleFactor);
+      
+      const newSessionRecipe = computeSessionRecipe(recipe, newAdjustments, newScaleFactor);
       return { 
         currentRecipe: recipe, 
-        scaleFactor: isDifferentRecipe ? 1 : state.scaleFactor, 
+        scaleFactor: newScaleFactor, 
         tempAdjustments: newAdjustments,
         sessionRecipe: newSessionRecipe,
       };
@@ -338,12 +344,85 @@ interface IngredientSubstitution {
   substitutedUnit: string;
 }
 
+export type OverallStatus = "good" | "warning" | "problem" | "unclear";
+export type ProblemType = "none" | "heat" | "texture" | "color" | "doneness" | "seasoning" | "mixing" | "moisture" | "plating" | "unclear";
+export type Confidence = "high" | "medium" | "low";
+
+export interface PhotoCheckAnalysis {
+  overallStatus: OverallStatus;
+  statusLabel: string;
+  currentState: string;
+  isAppropriate: boolean;
+  canProceed: boolean;
+  problemType: ProblemType;
+  confidence: Confidence;
+  reasons: string[];
+  risks: string[];
+  advice: string;
+  remedy: string;
+  followUpShotSuggestion?: string;
+}
+
+export interface PhotoCheckEvent {
+  eventId: string;
+  sessionId: string;
+  recipeId: string;
+  stepId: string;
+  stepNumber: number;
+  stepDescription: string;
+  type: "photo_check";
+  imageUrl: string;
+  createdAt: string;
+  analysis: PhotoCheckAnalysis;
+  userNote?: string;
+}
+
+export interface CookingSession {
+  sessionId: string;
+  recipeId: string;
+  recipeName: string;
+  versionType: "original" | "my";
+  startTime: string;
+  endTime?: string;
+  status: "active" | "completed" | "abandoned";
+  photoCheckEvents: PhotoCheckEvent[];
+}
+
+export interface SystemSummary {
+  photoCheckCount: number;
+  keyEvents: Array<{
+    stepNumber: number;
+    statusLabel: string;
+    advice: string;
+  }>;
+}
+
+export interface UserRecord {
+  result: number;
+  tasteFeedback: string[];
+  difficultyFeedback: string[];
+  notes: string;
+  photos: string[];
+}
+
+export interface CookingDiary {
+  diaryId: string;
+  sessionId: string;
+  recipeId: string;
+  recipeTitle: string;
+  versionType: "original" | "my";
+  createdAt: string;
+  systemSummary: SystemSummary;
+  userRecord: UserRecord;
+}
+
 interface CookingState {
   currentStepIndex: number;
   isTimerRunning: boolean;
   remainingTime: number;
   ingredientSubstitutions: IngredientSubstitution[];
   removedIngredients: string[];
+  currentSession: CookingSession | null;
   setCurrentStepIndex: (index: number) => void;
   nextStep: () => void;
   prevStep: () => void;
@@ -356,6 +435,23 @@ interface CookingState {
   removeIngredient: (ingredientId: string) => void;
   isIngredientRemoved: (ingredientId: string) => boolean;
   clearSubstitutions: () => void;
+  startSession: (recipeId: string, recipeName: string, versionType?: "original" | "my") => void;
+  endSession: () => void;
+  addPhotoCheckEvent: (event: Omit<PhotoCheckEvent, "eventId" | "createdAt" | "sessionId" | "recipeId" | "type">) => void;
+  getPhotoCheckEvents: () => PhotoCheckEvent[];
+  getSystemSummary: () => SystemSummary;
+}
+
+function generateSessionId(): string {
+  return `session-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+}
+
+function generateEventId(): string {
+  return `event-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+}
+
+function generateDiaryId(): string {
+  return `diary-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 }
 
 export const useCookingStore = create<CookingState>((set, get) => ({
@@ -364,6 +460,7 @@ export const useCookingStore = create<CookingState>((set, get) => ({
   remainingTime: 0,
   ingredientSubstitutions: [],
   removedIngredients: [],
+  currentSession: null,
   
   setCurrentStepIndex: (index) => set({ currentStepIndex: index }),
   nextStep: () => set((state) => ({ currentStepIndex: state.currentStepIndex + 1 })),
@@ -434,4 +531,77 @@ export const useCookingStore = create<CookingState>((set, get) => ({
   },
   
   clearSubstitutions: () => set({ ingredientSubstitutions: [], removedIngredients: [] }),
+  
+  startSession: (recipeId, recipeName, versionType = "original") => {
+    const session: CookingSession = {
+      sessionId: generateSessionId(),
+      recipeId,
+      recipeName,
+      versionType,
+      startTime: new Date().toISOString(),
+      photoCheckEvents: [],
+      status: "active",
+    };
+    set({ currentSession: session });
+  },
+  
+  endSession: () => {
+    set((state) => {
+      if (!state.currentSession) return state;
+      return {
+        currentSession: {
+          ...state.currentSession,
+          endTime: new Date().toISOString(),
+          status: "completed",
+        },
+      };
+    });
+  },
+  
+  addPhotoCheckEvent: (event) => {
+    set((state) => {
+      if (!state.currentSession) return state;
+      
+      const newEvent: PhotoCheckEvent = {
+        ...event,
+        eventId: generateEventId(),
+        sessionId: state.currentSession.sessionId,
+        recipeId: state.currentSession.recipeId,
+        type: "photo_check",
+        createdAt: new Date().toISOString(),
+      };
+      
+      return {
+        currentSession: {
+          ...state.currentSession,
+          photoCheckEvents: [...state.currentSession.photoCheckEvents, newEvent],
+        },
+      };
+    });
+  },
+  
+  getPhotoCheckEvents: () => {
+    const { currentSession } = get();
+    return currentSession?.photoCheckEvents || [];
+  },
+  
+  getSystemSummary: () => {
+    const { currentSession } = get();
+    if (!currentSession) {
+      return {
+        photoCheckCount: 0,
+        keyEvents: [],
+      };
+    }
+    
+    const events = currentSession.photoCheckEvents;
+    return {
+      photoCheckCount: events.length,
+      keyEvents: events.map(event => ({
+        stepNumber: event.stepNumber,
+        statusLabel: event.analysis.statusLabel,
+        advice: event.analysis.advice,
+      })),
+    };
+  },
 }));

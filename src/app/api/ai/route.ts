@@ -3,9 +3,9 @@ import { NextRequest, NextResponse } from "next/server";
 const ARK_API_KEY = process.env.ARK_API_KEY || "";
 const ARK_BASE_URL = (process.env.ARK_BASE_URL || "https://ark.cn-beijing.volces.com/api/v3").replace(/\/+$/, "");
 const ARK_MODEL = process.env.ARK_MODEL || "doubao-seed-2-0-mini-260215";
-const REQUEST_TIMEOUT_MS = Number(process.env.AI_TIMEOUT_MS || 60_000);
+const REQUEST_TIMEOUT_MS = Number(process.env.AI_TIMEOUT_MS || 120_000);
 
-type ApiType = "parseText" | "parseImage" | "getSubstitutions" | "analyzeCooking" | "optimizeRecipe" | "chatSubstitution" | "queryIngredientSubstitution";
+type ApiType = "parseText" | "parseImage" | "getSubstitutions" | "analyzeCooking" | "optimizeRecipe" | "optimizeRecipeFromLogs" | "analyzeCookingLog" | "analyzeCookingHistory" | "chatSubstitution" | "queryIngredientSubstitution";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -51,6 +51,8 @@ function buildMessages(type: ApiType, body: Record<string, unknown>): Array<{ ro
   const ingredientName = body.ingredientName;
   const currentAmount = body.currentAmount;
   const recipe = body.recipe;
+  const prevStep = body.prevStep;
+  const nextStep = body.nextStep;
 
   switch (type) {
     case "parseText": {
@@ -443,6 +445,119 @@ ${text}
         },
       ];
     }
+    case "analyzeCookingLog": {
+      const recipe = body.recipe;
+      const currentLog = body.currentLog;
+      
+      return [
+        {
+          role: "system",
+          content: `你是烹饪复盘助手。基于用户本次做菜记录进行分析。
+
+规则：
+1. 若评分低(1-2)、存在失败标签或负向描述，则强提示问题并给出改进建议
+2. 若评分高(4-5)、包含积极词语或"刚刚好"标签，则表扬用户并生成分享文案
+3. 评分中等(3)时，给出适度建议
+4. 输出JSON，无额外文字`,
+        },
+        {
+          role: "user",
+          content: `分析本次做菜记录：
+
+菜名：${recipe?.name || ""}
+食材：${JSON.stringify(recipe?.ingredients || [])}
+步骤：${JSON.stringify(recipe?.steps || [])}
+评分：${currentLog?.rating || ""}
+标签：${JSON.stringify(currentLog?.taste_feedback || []).concat(JSON.stringify(currentLog?.difficulty_feedback || []))}
+日记：${currentLog?.notes || ""}
+
+输出JSON：
+{
+  "should_generate_optimized_version": true,
+  "confidence": "high",
+  "is_positive": false,
+  "summary": {"title": "标题", "text": "摘要"},
+  "problems": [{"code": "too_spicy", "label": "太辣", "evidence_strength": "high", "likely_causes": ["原因"]}],
+  "preferences": [{"code": "less_spicy", "label": "偏少辣", "type": "flavor", "evidence_strength": "high"}],
+  "suggestions": [{"title": "建议", "detail": "详情", "priority": "high"}],
+  "praise": {"title": "表扬标题", "text": "表扬内容"},
+  "share_text": "分享文案（用于社交媒体分享，包含菜品名和成就感）",
+  "adjustment_direction": {"flavor_profile": "调味方向", "ingredient_adjustment": ["调整"]},
+  "generation_reason": "原因",
+  "ui_recommendation": {"primary_button_text": "按钮", "secondary_button_text": "次按钮", "show_share": false}
+}`,
+        },
+      ];
+    }
+    case "analyzeCookingHistory": {
+      const recipe = body.recipe;
+      const historyRecords = body.historyRecords;
+      const historyCount = body.historyCount;
+      
+      return [
+        {
+          role: "system",
+          content: `你是烹饪优化助手。基于用户历史做菜记录，分析口味偏好和重复问题，输出优化建议。
+
+规则：
+1. 关注重复出现的问题，忽略偶发问题
+2. 区分稳定偏好和偶发问题
+3. 输出JSON，无额外文字`,
+        },
+        {
+          role: "user",
+          content: `分析以下做菜记录：
+
+菜名：${recipe?.name || ""}
+食材：${JSON.stringify(recipe?.ingredients || [])}
+历史记录(${historyCount}条)：${JSON.stringify(historyRecords)}
+
+输出JSON：
+{
+  "should_generate_optimized_version": true,
+  "confidence": "high",
+  "summary": {"title": "标题", "text": "摘要"},
+  "problems": [{"code": "too_spicy", "label": "太辣", "frequency": 3, "evidence_strength": "high", "category": "stable"}],
+  "preferences": [{"code": "less_spicy", "label": "偏少辣", "type": "flavor", "evidence_strength": "high"}],
+  "suggestions": [{"title": "建议", "detail": "详情", "priority": "high"}],
+  "adjustment_direction": {"flavor_profile": "调味方向", "ingredient_adjustment": ["调整1"], "heat_adjustment": ["调整1"]},
+  "generation_reason": "原因",
+  "ui_recommendation": {"primary_button_text": "按钮文案", "secondary_button_text": "次按钮文案"}
+}`,
+        },
+      ];
+    }
+    case "optimizeRecipeFromLogs": {
+      const recipe = body.recipe;
+      const cookingLogs = body.cookingLogs;
+      return [
+        {
+          role: "system",
+          content: "你是食谱优化引擎。基于用户做菜反馈，调整食谱用量和步骤。",
+        },
+        {
+          role: "user",
+          content: `优化食谱，返回JSON：
+
+食谱：${JSON.stringify(recipe)}
+历史记录(${(cookingLogs as any[])?.length || 0}条)：${JSON.stringify(cookingLogs)}
+
+调整规则：
+- rating 1-2：大幅调整；3：适度调整；4-5：微调
+- too_spicy：减辣30-50%；too_salty：减盐20-30%；too_oily：减油30-50%
+- heat_hard：添加火候提示；step_unclear：优化步骤描述
+
+输出：
+{
+  "name": "我的版本",
+  "totalTime": 30,
+  "ingredients": [{"id": "id", "name": "名", "original_amount": 10, "original_unit": "克", "adjusted_amount": 8, "adjusted_unit": "克"}],
+  "steps": [{"order": 1, "description": "步骤", "duration": 5, "tip": "提示"}],
+  "adjustmentSummary": "优化说明"
+}`,
+        },
+      ];
+    }
     case "getSubstitutions": {
       return [
         {
@@ -469,15 +584,99 @@ ${text}
     }
     case "analyzeCooking": {
       const imageUrl = typeof content === "string" ? content : "";
+      const stepNum = body.stepNumber;
+      const currentStepDesc = body.currentStep;
+      const recipeNameVal = body.recipeName;
+      const prevStepVal = body.prevStep;
+      const nextStepVal = body.nextStep;
+      
       return [
         {
           role: "system",
-          content: "你是烹饪指导助手。请分析用户提供的烹饪图片，直接返回JSON格式结果，不要有任何解释。",
+          content: `你是"厨房新手拍照检查助手"，面向缺乏烹饪经验的用户提供做菜过程中的即时判断与补救建议。
+
+你的核心任务不是检查用户是否严格完成了某一步，而是根据用户上传的烹饪图片，结合当前步骤信息，判断当前烹饪状态是否恰当、是否存在明显问题、是否适合进入下一步，以及如果状态不理想该如何补救。
+
+【你的职责】
+1. 判断当前图片中的食物状态是否基本正常、是否符合当前烹饪阶段的常见表现
+2. 识别新手常见问题，例如：
+   - 炒糊 / 煎过头 / 上色过深
+   - 没拌匀 / 调料覆盖不均
+   - 状态不到位（如还没炒软、还没煎定型、汤汁过稀、表面不均匀）
+   - 火候可能偏大或偏小
+   - 当前不适合立即进入下一步
+3. 判断当前是否可以继续下一步
+4. 如果存在问题，给出具体、立刻可执行的补救建议
+5. 如果无法仅凭图片可靠判断，也要明确说明"不足以判断"的原因，并给出补拍建议
+
+【判断原则】
+1. 优先判断"当前状态是否恰当"，而不是判断"用户是否完整记录了前面步骤"
+2. 不得因为缺少过程记录，就推断用户前面操作错误
+3. 只根据图片中可见的信息、当前步骤描述和常见烹饪规律做判断
+4. 对无法从图片确认的内容，必须明确写为"无法确认"或"仅凭图片无法判断"
+5. 不要夸大问题；如果状态基本正常，就明确告诉用户可以继续
+6. 如果状态有轻微问题，给出微调建议，不要直接判定失败
+7. 如果状态存在明显问题，优先给出补救方案
+8. 建议必须具体、简洁、可执行，适合用户在厨房中快速理解
+9. 禁止输出模糊表述，例如"注意一下""适当处理""根据情况调整"，必须明确说明要做什么`,
         },
         {
           role: "user",
           content: [
-            { type: "text", text: `请分析这张烹饪图片，直接返回JSON，不要有任何解释。当前第${String(stepNumber || "")}步：${String(currentStep || "")}。要求返回的JSON格式：{"status":"当前阶段判断","suggestion":"下一步建议","warning":"风险预警(可选)"}` },
+            { type: "text", text: `请分析这张烹饪图片，直接返回JSON，不要有任何解释。
+
+当前步骤信息：
+- 步骤编号：第 ${String(stepNum || "")} 步
+- 步骤描述：${String(currentStepDesc || "")}
+${recipeNameVal ? `- 菜名：${String(recipeNameVal)}` : ""}
+${prevStepVal ? `- 上一步：${String(prevStepVal)}` : ""}
+${nextStepVal ? `- 下一步：${String(nextStepVal)}` : ""}
+
+返回 JSON 格式如下：
+{
+  "overallStatus": "good | warning | problem | unclear",
+  "statusLabel": "状态正常 | 需要注意 | 需要调整 | 无法判断",
+  "currentState": "一句话描述当前图片中的实际烹饪状态",
+  "isAppropriate": true或false,
+  "canProceed": true或false,
+  "problemType": "none | heat | texture | color | doneness | seasoning | mixing | moisture | plating | unclear",
+  "confidence": "high | medium | low",
+  "reasons": ["判断依据1", "判断依据2"],
+  "risks": ["潜在风险1", "潜在风险2"],
+  "advice": "当前最建议立即执行的下一步操作",
+  "remedy": "如果存在问题，给出具体补救方法；如果不需要补救则返回空字符串",
+  "followUpShotSuggestion": "如果图片不够清晰或无法判断，建议用户补拍的角度或内容；如果不需要则返回空字符串"
+}
+
+【字段解释】
+1. overallStatus
+- good：当前状态基本正常
+- warning：存在轻微问题，建议调整后继续
+- problem：存在明显问题，应先处理再继续
+- unclear：仅凭当前图片无法可靠判断
+
+2. statusLabel 必须与 overallStatus 对应
+
+3. currentState 必须先描述图片中"实际看得到"的状态
+
+4. isAppropriate：当前状态整体上是否恰当
+
+5. canProceed：是否可以进入下一步
+
+6. problemType 问题类型
+
+7. confidence 判断置信度
+
+8. followUpShotSuggestion：当confidence为low或overallStatus为unclear时，建议用户如何补拍
+
+【额外约束】
+1. 如果图片显示状态基本正常，不要强行挑错
+2. 如果图片信息不足，不要编造判断
+3. 如果无法判断内部熟度、味道等不可见信息，必须明确说明无法确认
+4. 不要提及"你没有记录前一步"
+5. 输出内容要适合厨房场景，简洁直接
+
+现在请根据用户上传的烹饪图片，直接返回 JSON：` },
             { type: "image_url", image_url: { url: imageUrl } },
           ],
         },
@@ -626,7 +825,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!type || !["parseText", "parseImage", "getSubstitutions", "analyzeCooking", "optimizeRecipe", "chatSubstitution", "queryIngredientSubstitution"].includes(type)) {
+    if (!type || !["parseText", "parseImage", "getSubstitutions", "analyzeCooking", "optimizeRecipe", "optimizeRecipeFromLogs", "analyzeCookingLog", "analyzeCookingHistory", "chatSubstitution", "queryIngredientSubstitution"].includes(type)) {
       return NextResponse.json({ error: { code: "INVALID_TYPE", message: "Invalid type" } }, { status: 400 });
     }
 

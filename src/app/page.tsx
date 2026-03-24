@@ -91,17 +91,19 @@ export default function HomePage() {
                 </div>
                 <div className="p-3">
                   <h3 className="font-medium text-gray-900 truncate">{recipe.name}</h3>
-                  <div className="flex items-center gap-2 mt-1 text-sm text-gray-500">
-                    <Clock className="w-4 h-4" />
-                    <span>{recipe.total_time} 分钟</span>
-                  </div>
-                  {ratings[recipe.id]?.count > 0 && (
-                    <div className="flex items-center gap-1 mt-1 text-sm">
-                      <Star className="w-4 h-4 text-yellow-400 fill-yellow-400" />
-                      <span className="text-gray-700">{ratings[recipe.id].avg}</span>
-                      <span className="text-gray-400">({ratings[recipe.id].count}次)</span>
+                  <div className="flex items-center justify-between mt-1 text-sm text-gray-500">
+                    <div className="flex items-center gap-1">
+                      <Clock className="w-4 h-4" />
+                      <span>{recipe.total_time} 分钟</span>
                     </div>
-                  )}
+                    {ratings[recipe.id]?.count > 0 && (
+                      <div className="flex items-center gap-0.5">
+                        <Star className="w-3.5 h-3.5 text-yellow-400 fill-yellow-400" />
+                        <span className="text-gray-700">{ratings[recipe.id].avg}</span>
+                        <span className="text-gray-400 text-xs">({ratings[recipe.id].count})</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             </Link>

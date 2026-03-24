@@ -1,15 +1,19 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter, useParams } from "next/navigation";
+import { useRouter, useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, ChevronLeft, ChevronRight, Clock, Play, Pause, RotateCcw, X, List, Lightbulb, ChefHat } from "lucide-react";
 import { getRecipe, Recipe } from "@/lib/supabase";
+import { getOptimizedRecipe } from "@/lib/recipe-adjustment-service";
 import { useCookingStore, useRecipeStore } from "@/store";
+import PhotoCheckButton from "@/components/PhotoCheckButton";
 
 export default function CookPage() {
   const params = useParams();
   const recipeId = params.id as string;
+  const searchParams = useSearchParams();
+  const version = searchParams.get("version") || "original";
   const router = useRouter();
   const { 
     currentStepIndex, 
@@ -22,7 +26,9 @@ export default function CookPage() {
     pauseTimer, 
     resetTimer, 
     tickTimer,
-    clearSubstitutions
+    clearSubstitutions,
+    startSession,
+    currentSession
   } = useCookingStore();
   const { 
     currentRecipe, 
@@ -30,6 +36,7 @@ export default function CookPage() {
     scaleFactor,
     clearTempAdjustments,
     sessionRecipe,
+    tempAdjustments,
   } = useRecipeStore();
   
   const [loading, setLoading] = useState(true);
@@ -58,12 +65,48 @@ export default function CookPage() {
       const data = await getRecipe(recipeId);
       
       if (!currentRecipe || currentRecipe.id !== recipeId) {
-        setCurrentRecipe(data);
-        setCurrentStepIndex(0);
-        clearSubstitutions();
-        if (data.steps.length > 0) {
-          resetTimer(data.steps[0].duration * 60);
+        const optimizedVersion = await getOptimizedRecipe(recipeId);
+        
+        if (optimizedVersion) {
+          const mappedIngredients = optimizedVersion.ingredients.map((ing) => ({
+            id: ing.id,
+            name: ing.name,
+            amount: ing.adjusted_amount ?? 0,
+            unit: ing.adjusted_unit ?? "",
+          }));
+          
+          const mappedSteps = optimizedVersion.steps.map((step) => ({
+            id: `step-${step.order}`,
+            order: step.order,
+            description: step.description,
+            duration: step.duration,
+            is_key_step: false,
+            tip: step.tip,
+            ingredients: step.ingredients,
+          }));
+          
+          const optimizedRecipe: Recipe = {
+            id: recipeId,
+            name: optimizedVersion.name,
+            total_time: optimizedVersion.total_time,
+            ingredients: mappedIngredients,
+            steps: mappedSteps,
+            image_url: data.image_url,
+            user_id: data.user_id,
+            created_at: data.created_at,
+          };
+          
+          setCurrentRecipe(optimizedRecipe);
+        } else {
+          setCurrentRecipe(data);
         }
+        
+        setCurrentStepIndex(0);
+        const steps = optimizedVersion ? optimizedVersion.steps : data.steps;
+        if (steps.length > 0) {
+          resetTimer(steps[0].duration * 60);
+        }
+        startSession(data.id, data.name);
       }
     } catch (error) {
       console.error("Failed to load recipe:", error);
@@ -125,26 +168,89 @@ export default function CookPage() {
       unit: string;
     }> = [];
 
+    const removedIngredientIds = new Set(
+      tempAdjustments
+        .filter(adj => adj.action === "remove")
+        .map(adj => adj.ingredientId)
+    );
+
+    const removedIngredientNames = new Set(
+      tempAdjustments
+        .filter(adj => adj.action === "remove")
+        .map(adj => adj.ingredientName.toLowerCase())
+    );
+
+    console.log('[DEBUG] getStepIngredients', {
+      stepDescription: step.description,
+      stepIngredientsField: step.ingredients,
+      tempAdjustments,
+      removedIngredientIds: Array.from(removedIngredientIds),
+      removedIngredientNames: Array.from(removedIngredientNames)
+    });
+
     if (step.ingredients && step.ingredients.length > 0) {
       step.ingredients.forEach(stepIng => {
-        const ingredient = sessionRecipe.ingredients.find(ing => ing.id === stepIng.ingredientId);
+        const isRemovedById = removedIngredientIds.has(stepIng.ingredientId);
+        const isRemovedByName = removedIngredientNames.has(stepIng.name.toLowerCase());
         
-        if (ingredient) {
-          const scaledAmount = stepIng.amount * scaleFactor;
-          
-          stepIngredients.push({
-            id: ingredient.id,
-            name: ingredient.name,
-            amount: scaledAmount,
-            unit: stepIng.unit,
-          });
+        console.log('[DEBUG] Checking stepIng:', stepIng.name, { isRemovedById, isRemovedByName });
+        
+        if (isRemovedById || isRemovedByName) {
+          console.log('[DEBUG] Skipping removed ingredient:', stepIng.name);
+          return;
         }
+        
+        let sessionIng = sessionRecipe.ingredients.find(i => i.id === stepIng.ingredientId);
+        
+        if (!sessionIng) {
+          sessionIng = sessionRecipe.ingredients.find(i => 
+            i.name.toLowerCase() === stepIng.name.toLowerCase()
+          );
+        }
+        
+        if (!sessionIng) {
+          const adjustment = tempAdjustments.find(a => 
+            a.ingredientName.toLowerCase() === stepIng.name.toLowerCase()
+          );
+          if (adjustment) {
+            sessionIng = sessionRecipe.ingredients.find(i => 
+              i.id === adjustment.ingredientId
+            );
+          }
+        }
+        
+        stepIngredients.push({
+          id: sessionIng?.id || stepIng.ingredientId,
+          name: sessionIng?.name || stepIng.name,
+          amount: sessionIng?.amount ?? stepIng.amount,
+          unit: sessionIng?.unit || stepIng.unit,
+        });
       });
-    } else {
+    }
+    
+    if (stepIngredients.length === 0) {
+      const description = step.description.toLowerCase();
+      console.log('[DEBUG] Matching from description:', description);
+      
       sessionRecipe.ingredients.forEach(ingredient => {
-        const pattern = new RegExp(escapeRegExp(ingredient.name), 'i');
-        if (pattern.test(step.description)) {
+        const ingredientName = ingredient.name.toLowerCase();
+        const isRemovedById = removedIngredientIds.has(ingredient.id);
+        const isRemovedByName = removedIngredientNames.has(ingredientName);
+        
+        console.log('[DEBUG] Checking ingredient from sessionRecipe:', ingredient.name, { 
+          isRemovedById, 
+          isRemovedByName,
+          includesInDescription: description.includes(ingredientName)
+        });
+        
+        if (isRemovedById || isRemovedByName) {
+          console.log('[DEBUG] Skipping removed ingredient (from description match):', ingredient.name);
+          return;
+        }
+        
+        if (description.includes(ingredientName)) {
           if (!stepIngredients.find(i => i.id === ingredient.id)) {
+            console.log('[DEBUG] Adding ingredient (from description match):', ingredient.name);
             stepIngredients.push({
               id: ingredient.id,
               name: ingredient.name,
@@ -154,8 +260,42 @@ export default function CookPage() {
           }
         }
       });
+      
+      if (currentRecipe) {
+        currentRecipe.ingredients.forEach(originalIng => {
+          const originalName = originalIng.name.toLowerCase();
+          const isRemovedById = removedIngredientIds.has(originalIng.id);
+          const isRemovedByName = removedIngredientNames.has(originalName);
+          
+          console.log('[DEBUG] Checking original ingredient:', originalIng.name, { 
+            isRemovedById, 
+            isRemovedByName,
+            includesInDescription: description.includes(originalName)
+          });
+          
+          if (isRemovedById || isRemovedByName) {
+            console.log('[DEBUG] Skipping removed original ingredient:', originalIng.name);
+            return;
+          }
+          
+          if (description.includes(originalName)) {
+            const sessionIng = sessionRecipe.ingredients.find(i => i.id === originalIng.id);
+            if (sessionIng && !stepIngredients.find(i => i.id === originalIng.id)) {
+              console.log('[DEBUG] Adding original ingredient:', originalIng.name);
+              stepIngredients.push({
+                id: originalIng.id,
+                name: sessionIng.name,
+                amount: sessionIng.amount,
+                unit: sessionIng.unit,
+              });
+            }
+          }
+        });
+      }
     }
-
+    
+    console.log('[DEBUG] Final stepIngredients:', stepIngredients);
+    
     return stepIngredients;
   }
 
@@ -212,6 +352,12 @@ export default function CookPage() {
   const currentStep = sessionRecipe.steps[currentStepIndex];
   const progress = ((currentStepIndex + 1) / sessionRecipe.steps.length) * 100;
   const stepIngredients = getStepIngredients(currentStep);
+  
+  console.log("=== Cook Page Render ===");
+  console.log("sessionRecipe:", sessionRecipe?.name);
+  console.log("sessionRecipe.steps[currentStepIndex]:", sessionRecipe?.steps[currentStepIndex]);
+  console.log("tempAdjustments:", tempAdjustments);
+  console.log("stepIngredients:", stepIngredients);
 
   return (
     <div className="min-h-screen bg-gray-900 text-white flex flex-col">
@@ -260,6 +406,16 @@ export default function CookPage() {
             </p>
           </div>
 
+          {/* Tip */}
+          {currentStep.tip && (
+            <div className="bg-primary-900/30 border border-primary-500/30 rounded-2xl p-4 mb-4">
+              <div className="flex items-start gap-2">
+                <Lightbulb className="w-5 h-5 text-primary-400 flex-shrink-0 mt-0.5" />
+                <p className="text-primary-200 text-sm">{currentStep.tip}</p>
+              </div>
+            </div>
+          )}
+
           {/* Step Ingredients */}
           {stepIngredients.length > 0 && (
             <div className="bg-gray-800 rounded-2xl p-4 mb-4">
@@ -277,19 +433,9 @@ export default function CookPage() {
             </div>
           )}
 
-          {/* Tip */}
-          {currentStep.tip && (
-            <div className="bg-primary-900/30 border border-primary-500/30 rounded-2xl p-4 mb-4">
-              <div className="flex items-start gap-2">
-                <Lightbulb className="w-5 h-5 text-primary-400 flex-shrink-0 mt-0.5" />
-                <p className="text-primary-200 text-sm">{currentStep.tip}</p>
-              </div>
-            </div>
-          )}
-
           {/* Timer */}
           {currentStep.duration > 0 && (
-            <div className="bg-gray-800 rounded-2xl p-6">
+            <div className="bg-gray-800 rounded-2xl p-6 mb-4">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
                   <Clock className="w-5 h-5 text-primary-400" />
@@ -332,21 +478,32 @@ export default function CookPage() {
 
       {/* Bottom Navigation */}
       <footer className="bg-gray-900/95 backdrop-blur border-t border-gray-800 p-4 safe-bottom">
-        <div className="max-w-md mx-auto flex gap-3">
+        <div className="max-w-md mx-auto flex gap-2">
           <button
             onClick={handlePrevStep}
             disabled={currentStepIndex === 0}
-            className="flex-1 bg-gray-800 text-gray-300 py-4 rounded-xl font-medium flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex-1 bg-gray-800 text-gray-300 py-3 rounded-xl font-medium flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
           >
-            <ChevronLeft className="w-5 h-5" />
+            <ChevronLeft className="w-4 h-4" />
             上一步
           </button>
+          
+          <PhotoCheckButton
+            stepId={currentStep.id}
+            stepNumber={currentStepIndex + 1}
+            stepDescription={currentStep.description}
+            recipeId={sessionRecipe.id}
+            recipeName={sessionRecipe.name}
+            prevStep={currentStepIndex > 0 ? sessionRecipe.steps[currentStepIndex - 1].description : undefined}
+            nextStep={currentStepIndex < sessionRecipe.steps.length - 1 ? sessionRecipe.steps[currentStepIndex + 1].description : undefined}
+          />
+          
           <button
             onClick={handleNextStep}
-            className="flex-1 bg-primary-500 text-white py-4 rounded-xl font-medium flex items-center justify-center gap-2"
+            className="flex-1 bg-primary-500 text-white py-3 rounded-xl font-medium flex items-center justify-center gap-1 text-sm"
           >
             {currentStepIndex === sessionRecipe.steps.length - 1 ? "完成" : "下一步"}
-            <ChevronRight className="w-5 h-5" />
+            <ChevronRight className="w-4 h-4" />
           </button>
         </div>
       </footer>

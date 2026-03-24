@@ -34,6 +34,13 @@ interface ManualIngredient {
   unit: string;
 }
 
+interface StepIngredient {
+  ingredientId: string;
+  name: string;
+  amount: number;
+  unit: string;
+}
+
 interface ManualStep {
   id: string;
   order: number;
@@ -41,6 +48,7 @@ interface ManualStep {
   duration: number;
   timeUnit: string;
   tip?: string;
+  ingredients: StepIngredient[];
 }
 
 export default function EditRecipePage() {
@@ -81,6 +89,7 @@ export default function EditRecipePage() {
         duration: step.duration,
         timeUnit: "分钟",
         tip: step.tip,
+        ingredients: step.ingredients || [],
       })));
     } catch (err) {
       console.error("Failed to load recipe:", err);
@@ -124,6 +133,7 @@ export default function EditRecipePage() {
             duration: durationInMinutes,
             is_key_step: false,
             tip: step.tip,
+            ingredients: step.ingredients,
           };
         }),
       });
@@ -164,6 +174,7 @@ export default function EditRecipePage() {
       description: "",
       duration: 5,
       timeUnit: "分钟",
+      ingredients: [],
     }]);
   }
 
@@ -175,6 +186,57 @@ export default function EditRecipePage() {
 
   function removeStep(index: number) {
     setSteps(prev => prev.filter((_, i) => i !== index).map((step, i) => ({ ...step, order: i + 1 })));
+  }
+
+  function toggleStepIngredient(stepIndex: number, ingredient: ManualIngredient) {
+    setSteps(prev => prev.map((step, i) => {
+      if (i !== stepIndex) return step;
+      
+      const existingIndex = step.ingredients.findIndex(
+        ing => ing.ingredientId === ingredient.id
+      );
+      
+      if (existingIndex >= 0) {
+        const newIngredients = step.ingredients.filter(
+          ing => ing.ingredientId !== ingredient.id
+        );
+        return { ...step, ingredients: newIngredients };
+      } else {
+        const newIngredient: StepIngredient = {
+          ingredientId: ingredient.id,
+          name: ingredient.name,
+          amount: ingredient.amount,
+          unit: ingredient.unit,
+        };
+        return { ...step, ingredients: [...step.ingredients, newIngredient] };
+      }
+    }));
+  }
+
+  function updateStepIngredientAmount(stepIndex: number, ingredientId: string, amount: number) {
+    setSteps(prev => prev.map((step, i) => {
+      if (i !== stepIndex) return step;
+      
+      return {
+        ...step,
+        ingredients: step.ingredients.map(ing =>
+          ing.ingredientId === ingredientId ? { ...ing, amount } : ing
+        ),
+      };
+    }));
+  }
+
+  function updateStepIngredientUnit(stepIndex: number, ingredientId: string, unit: string) {
+    setSteps(prev => prev.map((step, i) => {
+      if (i !== stepIndex) return step;
+      
+      return {
+        ...step,
+        ingredients: step.ingredients.map(ing =>
+          ing.ingredientId === ingredientId ? { ...ing, unit } : ing
+        ),
+      };
+    }));
   }
 
   if (loading) {
@@ -218,9 +280,13 @@ export default function EditRecipePage() {
 
         <div>
           <div className="flex items-center justify-between mb-2">
-            <label className="text-sm font-medium text-gray-700">食材清单</label>
+            <div className="flex items-center gap-2">
+              <label className="text-sm font-medium text-gray-700">食材清单</label>
+              <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded">一人份量</span>
+            </div>
             <button onClick={addIngredient} className="text-primary-500 text-sm">+ 添加食材</button>
           </div>
+          <p className="text-xs text-gray-400 mb-2">设置一人份的食材总量，做菜时可按需调整份量</p>
           <div className="space-y-3">
             {ingredients.map((ing, index) => (
               <div key={ing.id} className="flex gap-2 items-center">
@@ -321,6 +387,68 @@ export default function EditRecipePage() {
                     placeholder="小贴士（可选）"
                     className="input-field w-full text-sm"
                   />
+                  {ingredients.filter(ing => ing.name).length > 0 && (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-500">本步骤所需食材：</span>
+                        <span className="text-xs text-gray-400">(点击选择，设置该步骤实际用量)</span>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {ingredients.filter(ing => ing.name).map((ing) => {
+                          const isSelected = step.ingredients.some(
+                            stepIng => stepIng.ingredientId === ing.id
+                          );
+                          return (
+                            <button
+                              key={ing.id}
+                              type="button"
+                              onClick={() => toggleStepIngredient(index, ing)}
+                              className={`px-2 py-1 rounded-full text-xs transition-colors ${
+                                isSelected
+                                  ? "bg-primary-500 text-white"
+                                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                              }`}
+                            >
+                              {ing.name}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {step.ingredients.length > 0 && (
+                        <div className="space-y-2 mt-2 pt-2 border-t border-gray-100">
+                          <span className="text-xs text-gray-400">设置各食材用量：</span>
+                          {step.ingredients.map((stepIng) => {
+                            const originalIng = ingredients.find(i => i.id === stepIng.ingredientId);
+                            return (
+                              <div key={stepIng.ingredientId} className="flex items-center gap-2">
+                                <span className="text-xs text-gray-600 w-20 truncate">{stepIng.name}</span>
+                                <input
+                                  type="number"
+                                  value={stepIng.amount}
+                                  onChange={(e) => updateStepIngredientAmount(index, stepIng.ingredientId, parseFloat(e.target.value) || 0)}
+                                  className="input-field w-16 text-center text-xs py-1"
+                                />
+                                <select
+                                  value={stepIng.unit}
+                                  onChange={(e) => updateStepIngredientUnit(index, stepIng.ingredientId, e.target.value)}
+                                  className="input-field text-xs py-1 px-2"
+                                >
+                                  {INGREDIENT_UNITS.map(u => (
+                                    <option key={u.value} value={u.value}>{u.label}</option>
+                                  ))}
+                                </select>
+                                {originalIng && (
+                                  <span className="text-xs text-gray-400">
+                                    (总量: {originalIng.amount}{originalIng.unit})
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
                 {steps.length > 1 && (
                   <button onClick={() => removeStep(index)} className="w-8 h-8 text-red-500 flex items-center justify-center flex-shrink-0">
