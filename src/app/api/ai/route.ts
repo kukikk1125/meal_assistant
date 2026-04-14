@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 
+export const maxDuration = 60; // Vercel Pro 计划最大 60秒，免费计划 10秒
+
 const ARK_API_KEY = process.env.ARK_API_KEY || "";
-const ARK_BASE_URL = (process.env.ARK_BASE_URL || "https://ark.cn-beijing.volces.com/api/v3").replace(/\/+$/, "");
-const ARK_MODEL = process.env.ARK_MODEL || "doubao-seed-2-0-mini-260215";
-const REQUEST_TIMEOUT_MS = Number(process.env.AI_TIMEOUT_MS || 120_000);
+const ARK_BASE_URL = (process.env.ARK_BASE_URL || "https://api.deepseek.com").replace(/\/+$/, "");
+const ARK_MODEL = process.env.ARK_MODEL || "deepseek-chat";
+const REQUEST_TIMEOUT_MS = Number(process.env.AI_TIMEOUT_MS || 55_000); // 55秒，留5秒余量
 
 type ApiType = "parseText" | "parseImage" | "getSubstitutions" | "analyzeCooking" | "optimizeRecipe" | "optimizeRecipeFromLogs" | "analyzeCookingLog" | "analyzeCookingHistory" | "chatSubstitution" | "queryIngredientSubstitution";
 
@@ -69,6 +71,9 @@ function clampInputText(text: unknown): string {
 }
 
 async function requestChatCompletions(messages: Array<{ role: string; content: string | Array<any> }>, signal: AbortSignal): Promise<any> {
+  console.log("[AI API] Requesting:", ARK_MODEL, "at", ARK_BASE_URL);
+  console.log("[AI API] API Key configured:", !!ARK_API_KEY ? "Yes (length: " + ARK_API_KEY.length + ")" : "No");
+  
   const response = await fetch(`${ARK_BASE_URL}/chat/completions`, {
     method: "POST",
     headers: {
@@ -83,14 +88,24 @@ async function requestChatCompletions(messages: Array<{ role: string; content: s
     signal,
   });
 
+  console.log("[AI API] Response status:", response.status);
+
   if (!response.ok) {
-    const rawError = await response.text();
+    let rawError = "";
+    try {
+      rawError = await response.text();
+      console.log("[AI API] Error response:", rawError);
+    } catch (e) {
+      rawError = "Failed to read error response";
+    }
     const err = new Error(rawError);
     (err as Error & { status?: number }).status = response.status;
     throw err;
   }
 
-  return response.json();
+  const data = await response.json();
+  console.log("[AI API] Success, received response");
+  return data;
 }
 
 function buildMessages(type: ApiType, body: Record<string, unknown>): Array<{ role: string; content: any }> {
@@ -864,9 +879,16 @@ function extractContentFromChat(data: any): string {
 }
 
 export async function POST(request: NextRequest) {
+  console.log("[AI API] ===== New Request =====");
+  console.log("[AI API] ARK_API_KEY configured:", !!ARK_API_KEY);
+  console.log("[AI API] ARK_BASE_URL:", ARK_BASE_URL);
+  console.log("[AI API] ARK_MODEL:", ARK_MODEL);
+  
   try {
     const body = (await request.json()) as Record<string, unknown>;
     const type = body.type as ApiType;
+    
+    console.log("[AI API] Request type:", type);
 
     if (!ARK_API_KEY) {
       return NextResponse.json(
@@ -900,8 +922,18 @@ export async function POST(request: NextRequest) {
     console.error("AI API error:", error);
     
     if (error instanceof Error && error.name === "AbortError") {
+      console.log("[AI API] ===== TIMEOUT =====");
+      console.log("[AI API] Vercel free plan has 10s limit");
+      console.log("[AI API] Consider upgrading to Pro for 60s");
+      console.log("[AI API] Or try a faster model (e.g., doubao-seed-2-0-mini)");
+      
       return NextResponse.json(
-        { error: { code: "TIMEOUT", message: "请求超时，请重试" } },
+        { 
+          error: { 
+            code: "TIMEOUT", 
+            message: "请求超时。免费版 Vercel 仅支持 10 秒，请：\n1. 升级 Vercel Pro（支持 60 秒）\n2. 或使用更快的模型（如 doubao-seed-2-0-mini）\n3. 或尝试简化请求内容" 
+          } 
+        },
         { status: 504 }
       );
     }
