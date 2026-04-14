@@ -6,8 +6,8 @@ import {
 } from "@/types/recipe-adjustment";
 
 const ARK_API_KEY = process.env.ARK_API_KEY || "";
-const ARK_BASE_URL = (process.env.ARK_BASE_URL || "https://api.deepseek.com").replace(/\/+$/, "");
-const ARK_MODEL = process.env.ARK_MODEL || "deepseek-chat";
+const ARK_BASE_URL = (process.env.ARK_BASE_URL || "https://ark.cn-beijing.volces.com/api/v3").replace(/\/+$/, "");
+const ARK_MODEL = process.env.ARK_MODEL || "doubao-seed-2-0-mini-260215";
 
 function extractJSON(text: string): string {
   const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);

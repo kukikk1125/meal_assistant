@@ -3,8 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 export const maxDuration = 60; // Vercel Pro 计划最大 60秒，免费计划 10秒
 
 const ARK_API_KEY = process.env.ARK_API_KEY || "";
-const ARK_BASE_URL = (process.env.ARK_BASE_URL || "https://api.deepseek.com").replace(/\/+$/, "");
-const ARK_MODEL = process.env.ARK_MODEL || "deepseek-chat";
+const ARK_BASE_URL = (process.env.ARK_BASE_URL || "https://ark.cn-beijing.volces.com/api/v3").replace(/\/+$/, "");
+const ARK_MODEL = process.env.ARK_MODEL || "doubao-seed-2-0-mini-260215";
 const REQUEST_TIMEOUT_MS = Number(process.env.AI_TIMEOUT_MS || 55_000); // 55秒，留5秒余量
 
 type ApiType = "parseText" | "parseImage" | "getSubstitutions" | "analyzeCooking" | "optimizeRecipe" | "optimizeRecipeFromLogs" | "analyzeCookingLog" | "analyzeCookingHistory" | "chatSubstitution" | "queryIngredientSubstitution";
