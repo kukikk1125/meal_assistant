@@ -107,16 +107,19 @@ export default function RecipeDetailPage() {
       if (optimizedVersion) {
         setMyVersionSummary(optimizedVersion.adjustment_summary);
         const mappedIngredients = optimizedVersion.ingredients.map((ing) => ({
-          id: ing.id,
-          name: ing.name,
+          id: ing.id || "",
+          name: ing.name || "",
           amount: ing.adjusted_amount ?? 0,
           unit: ing.adjusted_unit ?? "",
+          is_optional: false,
         }));
         
         const mappedSteps = optimizedVersion.steps.map((step) => ({
+          id: `step-${step.order}`,
           order: step.order,
           description: step.description,
           duration: step.duration,
+          is_key_step: false,
           ingredients: step.ingredients,
           tip: step.tip,
         }));
@@ -125,11 +128,13 @@ export default function RecipeDetailPage() {
           id: recipeId,
           name: optimizedVersion.name,
           total_time: optimizedVersion.total_time,
+          servings: 1,
           ingredients: mappedIngredients,
           steps: mappedSteps,
           image_url: recipe.image_url,
           user_id: recipe.user_id,
           created_at: recipe.created_at,
+          updated_at: recipe.updated_at || new Date().toISOString(),
         };
         
         setMyVersionRecipe(myVersionRecipeData);
@@ -167,7 +172,8 @@ export default function RecipeDetailPage() {
     if (currentVersion === "my" && myVersionRecipe) {
       return myVersionRecipe;
     }
-    return currentRecipe;
+    // 这里 currentRecipe 一定不为 null，因为上面有 if (!currentRecipe) 的检查
+    return currentRecipe as Recipe;
   }
 
   function handleVersionChange(version: "original" | "my") {

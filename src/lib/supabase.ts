@@ -465,16 +465,22 @@ export async function saveOptimizedRecipe(recipeId: string, data: {
   };
   localStorage.setItem(`my-version-${recipeId}`, JSON.stringify(versionData));
   
-  return {
+  const result: OptimizedRecipe = {
     id: 'local-' + recipeId,
     recipe_id: recipeId,
     user_id: 'demo-user',
-    ...versionData,
+    name: data.name,
     total_time: data.totalTime,
+    ingredients: data.ingredients,
+    steps: data.steps,
+    adjustment_summary: data.adjustmentSummary,
     based_on_logs_count: data.basedOnLogsCount,
+    analysis_stability: data.analysisStability,
+    generation_reason: data.generationReason,
     created_at: versionData.createdAt,
     updated_at: versionData.createdAt,
-  } as OptimizedRecipe;
+  };
+  return result;
 }
 
 export async function deleteOptimizedRecipe(recipeId: string): Promise<void> {

@@ -12,6 +12,56 @@ interface ChatMessage {
   content: string;
 }
 
+interface RecipeIngredient {
+  id?: string;
+  name?: string;
+  amount?: number;
+  unit?: string;
+  scalable?: boolean;
+  original_amount?: number;
+  original_unit?: string;
+  adjusted_amount?: number;
+  adjusted_unit?: string;
+  change_reason?: string;
+}
+
+interface RecipeStepIngredient {
+  ingredientId?: string;
+  name?: string;
+  amount?: number;
+  unit?: string;
+}
+
+interface RecipeStep {
+  order?: number;
+  description?: string;
+  duration?: number;
+  is_key_step?: boolean;
+  tip?: string;
+  image_url?: string;
+  ingredients?: RecipeStepIngredient[];
+  changes?: string[];
+  relatedIngredients?: string[];
+}
+
+interface Recipe {
+  name?: string;
+  totalTime?: number;
+  total_time?: number;
+  ingredients?: RecipeIngredient[];
+  steps?: RecipeStep[];
+}
+
+interface CurrentLog {
+  rating?: number | string;
+  taste_feedback?: string[];
+  difficulty_feedback?: string[];
+  notes?: string;
+  cookTime?: string;
+  servingAdjustment?: string;
+  ingredientReplacements?: string;
+}
+
 function clampInputText(text: unknown): string {
   if (typeof text !== "string") return "";
   const trimmed = text.trim();
@@ -50,7 +100,11 @@ function buildMessages(type: ApiType, body: Record<string, unknown>): Array<{ ro
   const recipeName = body.recipeName;
   const ingredientName = body.ingredientName;
   const currentAmount = body.currentAmount;
-  const recipe = body.recipe;
+  const recipe = body.recipe as Recipe | undefined;
+  const currentLog = body.currentLog as CurrentLog | undefined;
+  const historyRecords = body.historyRecords as Array<CurrentLog> | undefined;
+  const historyCount = body.historyCount;
+  const cookingLogs = body.cookingLogs as Array<CurrentLog> | undefined;
   const prevStep = body.prevStep;
   const nextStep = body.nextStep;
 
@@ -446,8 +500,6 @@ ${text}
       ];
     }
     case "analyzeCookingLog": {
-      const recipe = body.recipe;
-      const currentLog = body.currentLog;
       
       return [
         {
@@ -468,7 +520,10 @@ ${text}
 食材：${JSON.stringify(recipe?.ingredients || [])}
 步骤：${JSON.stringify(recipe?.steps || [])}
 评分：${currentLog?.rating || ""}
-标签：${JSON.stringify(currentLog?.taste_feedback || []).concat(JSON.stringify(currentLog?.difficulty_feedback || []))}
+标签：${JSON.stringify([
+  ...(currentLog?.taste_feedback || []),
+  ...(currentLog?.difficulty_feedback || [])
+])}
 日记：${currentLog?.notes || ""}
 
 输出JSON：
@@ -490,9 +545,6 @@ ${text}
       ];
     }
     case "analyzeCookingHistory": {
-      const recipe = body.recipe;
-      const historyRecords = body.historyRecords;
-      const historyCount = body.historyCount;
       
       return [
         {
@@ -528,8 +580,6 @@ ${text}
       ];
     }
     case "optimizeRecipeFromLogs": {
-      const recipe = body.recipe;
-      const cookingLogs = body.cookingLogs;
       return [
         {
           role: "system",

@@ -69,10 +69,11 @@ export default function CookPage() {
         
         if (optimizedVersion) {
           const mappedIngredients = optimizedVersion.ingredients.map((ing) => ({
-            id: ing.id,
-            name: ing.name,
+            id: ing.id || "",
+            name: ing.name || "",
             amount: ing.adjusted_amount ?? 0,
             unit: ing.adjusted_unit ?? "",
+            is_optional: false,
           }));
           
           const mappedSteps = optimizedVersion.steps.map((step) => ({
@@ -89,11 +90,13 @@ export default function CookPage() {
             id: recipeId,
             name: optimizedVersion.name,
             total_time: optimizedVersion.total_time,
+            servings: 1,
             ingredients: mappedIngredients,
             steps: mappedSteps,
             image_url: data.image_url,
             user_id: data.user_id,
             created_at: data.created_at,
+            updated_at: data.updated_at || new Date().toISOString(),
           };
           
           setCurrentRecipe(optimizedRecipe);

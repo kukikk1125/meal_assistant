@@ -231,8 +231,8 @@ export default function SmartAdjustPage() {
                 {optimizedRecipe.ingredients.map((ing, index) => {
                   const originalIng = currentRecipe.ingredients.find(o => o.id === ing.id);
                   const hasChanged = originalIng && (
-                    originalIng.amount !== ing.amount || 
-                    originalIng.unit !== ing.unit
+                    originalIng.amount !== ing.adjusted_amount || 
+                    originalIng.unit !== ing.adjusted_unit
                   );
                   return (
                     <div key={index} className={`rounded-xl p-3 ${hasChanged ? 'bg-green-50' : 'bg-gray-50'}`}>
@@ -245,7 +245,7 @@ export default function SmartAdjustPage() {
                             </span>
                           )}
                           <span className={`text-sm font-medium ${hasChanged ? 'text-green-600' : 'text-gray-600'}`}>
-                            {ing.amount}{ing.unit}
+                            {ing.adjusted_amount}{ing.adjusted_unit}
                           </span>
                         </div>
                       </div>
