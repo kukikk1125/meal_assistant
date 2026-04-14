@@ -129,32 +129,142 @@ function buildMessages(type: ApiType, body: Record<string, unknown>): Array<{ ro
       return [
         {
           role: "system",
-          content: "纯信息抽取，从食谱文本提取明确信息，返回JSON。",
+          content: "你是一个纯信息抽取引擎。仅从输入的食谱文本中提取明确存在的信息，不要做任何智能估算或补充。",
         },
         {
           role: "user",
-          content: `解析食谱文本，返回JSON：
-
-文本：
+          content: `请解析以下食谱文本，直接返回JSON，不要有任何解释：
+文本内容：
 ${text}
 
-返回格式：
+要求返回的JSON格式（必须严格匹配）：
 {
   "name": "菜名",
-  "totalTime": 分钟数,
-  "ingredients": [{"id": "ing_xx", "name": "食材名", "amount": 总量, "unit": "单位", "scalable": true}],
-  "steps": [{"order": 1, "description": "步骤", "duration": 分钟, "ingredients": [{"ingredientId": "ing_xx", "name": "食材名", "amount": 本步用量, "unit": "单位"}]}]
+  "totalTime": 数字分钟,
+  "ingredients": [
+    {
+      "id": "食材ID（如：ing_salt, ing_oil, ing_egg）",
+      "name": "食材名",
+      "amount": 该食材在整道菜中的总用量,
+      "unit": "单位",
+      "scalable": true或false
+    }
+  ],
+  "steps": [
+    {
+      "order": 数字,
+      "description": "步骤描述",
+      "duration": 数字分钟,
+      "ingredients": [
+        {
+          "ingredientId": "对应ingredients中的id",
+          "name": "食材名",
+          "amount": 本步骤使用的用量,
+          "unit": "单位"
+        }
+      ]
+    }
+  ]
 }
 
-规则：
-1. 菜名：取最大标题或首行，去表情
-2. 食材ID：ing_拼音/英文，全小写，下划线连接
-3. ingredients.amount = 各步骤用量之和
-4. steps.ingredients.amount = 该步骤用量
-5. 不确定值填0，只提取明确信息，不编造
-6. scalable：主料=true，装饰=false
+====================
+抽取规则：
 
-只输出JSON，无其他内容。`,
+【1. 菜名识别】
+- 优先提取最大标题
+- 若无明确标题，使用第一行文本
+- 去除表情符号和营销词
+
+【2. 食材ID生成规则】
+- 为每个食材生成唯一ID，格式：ing_食材拼音或英文
+- 例如：盐 → ing_salt, 食用油 → ing_oil, 鸡蛋 → ing_egg
+- ID必须全小写，用下划线连接
+
+【3. 食材总量计算（核心规则！）】
+- ingredients中的amount是该食材在整道菜中的总用量
+- **重要：总用量 = 所有步骤中该食材用量之和**
+- 例如：葱在步骤1用5克，步骤2用10克，步骤3用5克，则总量为20克
+- 如果某食材在多个步骤中使用，必须累加所有步骤的用量
+- scalable字段：主料和主要调料填true，装饰性食材填false
+
+【4. 步骤食材用量（核心规则！）】
+- 每个步骤的ingredients数组列出该步骤实际使用的食材及用量
+- ingredientId必须对应ingredients中的id
+- **amount是该步骤使用的具体用量，不是总量**
+- **关键：同一食材在多个步骤中的用量相加，必须等于ingredients中的总量**
+- 如果步骤中未明确用量，根据常识合理分配到各步骤
+- 例如：总量20克葱，分3个步骤使用，可以分配为：步骤1用5克，步骤2用10克，步骤3用5克
+
+【5. 步骤描述规则】
+- 步骤描述保持原样，不要添加或修改任何内容
+- 不要在步骤中添加食材用量信息
+- 保持步骤描述简洁清晰
+
+【6. 纯提取原则（重要！）】
+- 只提取文本中明确存在的信息
+- 不确定的 amount 填 0
+- 不确定的 duration 填 0
+- 不确定的 totalTime 填 0
+- 不做任何智能估算或补充
+
+====================
+重要约束：
+- 这是纯信息抽取任务，不是优化任务
+- 禁止编造文本中不存在的信息
+- 不确定的内容填0，不要估算
+- 严禁输出解释、注释、Markdown、额外字段
+- 只输出一个合法JSON对象
+
+示例输出：
+{
+  "name": "番茄炒蛋",
+  "totalTime": 10,
+  "ingredients": [
+    {"id": "ing_egg", "name": "鸡蛋", "amount": 3, "unit": "个", "scalable": true},
+    {"id": "ing_tomato", "name": "番茄", "amount": 2, "unit": "个", "scalable": true},
+    {"id": "ing_oil", "name": "食用油", "amount": 30, "unit": "毫升", "scalable": true},
+    {"id": "ing_salt", "name": "盐", "amount": 3, "unit": "克", "scalable": true}
+  ],
+  "steps": [
+    {
+      "order": 1,
+      "description": "鸡蛋打散，番茄切块",
+      "duration": 2,
+      "ingredients": [
+        {"ingredientId": "ing_egg", "name": "鸡蛋", "amount": 3, "unit": "个"}
+      ]
+    },
+    {
+      "order": 2,
+      "description": "热锅倒油，油热后倒入蛋液炒散盛出",
+      "duration": 2,
+      "ingredients": [
+        {"ingredientId": "ing_oil", "name": "食用油", "amount": 15, "unit": "毫升"},
+        {"ingredientId": "ing_egg", "name": "鸡蛋", "amount": 3, "unit": "个"}
+      ]
+    },
+    {
+      "order": 3,
+      "description": "锅中再加少许油，放入番茄翻炒出汁",
+      "duration": 3,
+      "ingredients": [
+        {"ingredientId": "ing_oil", "name": "食用油", "amount": 15, "unit": "毫升"},
+        {"ingredientId": "ing_tomato", "name": "番茄", "amount": 2, "unit": "个"}
+      ]
+    },
+    {
+      "order": 4,
+      "description": "倒入炒好的鸡蛋，加盐调味翻炒均匀",
+      "duration": 1,
+      "ingredients": [
+        {"ingredientId": "ing_egg", "name": "鸡蛋", "amount": 3, "unit": "个"},
+        {"ingredientId": "ing_salt", "name": "盐", "amount": 3, "unit": "克"}
+      ]
+    }
+  ]
+}
+
+现在开始输出最终JSON：`,
         },
       ];
     }
@@ -163,30 +273,90 @@ ${text}
       return [
         {
           role: "system",
-          content: "纯信息抽取，从食谱图片提取明确信息，返回JSON。",
+          content: "你是一个纯信息抽取引擎。仅从输入的食谱图片中提取明确存在的信息，不要做任何智能估算或补充。",
         },
         {
           role: "user",
           content: [
-            { type: "text", text: `识别图片中的食谱，返回JSON：
-
-返回格式：
+            { type: "text", text: `请识别这张图片中的食谱内容，直接返回JSON，不要有任何解释。要求返回的JSON格式：
 {
   "name": "菜名",
-  "totalTime": 分钟数,
-  "ingredients": [{"id": "ing_xx", "name": "食材名", "amount": 总量, "unit": "单位", "scalable": true}],
-  "steps": [{"order": 1, "description": "步骤", "duration": 分钟, "ingredients": [{"ingredientId": "ing_xx", "name": "食材名", "amount": 本步用量, "unit": "单位"}]}]
+  "totalTime": 数字分钟,
+  "ingredients": [
+    {
+      "id": "食材ID（如：ing_salt, ing_oil, ing_egg）",
+      "name": "食材名",
+      "amount": 该食材在整道菜中的总用量,
+      "unit": "单位",
+      "scalable": true或false
+    }
+  ],
+  "steps": [
+    {
+      "order": 数字,
+      "description": "步骤描述",
+      "duration": 数字分钟,
+      "ingredients": [
+        {
+          "ingredientId": "对应ingredients中的id",
+          "name": "食材名",
+          "amount": 本步骤使用的用量,
+          "unit": "单位"
+        }
+      ]
+    }
+  ]
 }
 
-规则：
-1. 菜名：取最大标题或首行，去表情
-2. 食材ID：ing_拼音/英文，全小写，下划线连接
-3. ingredients.amount = 各步骤用量之和
-4. steps.ingredients.amount = 该步骤用量
-5. 不确定值填0，只提取明确信息，不编造
-6. scalable：主料=true，装饰=false
+====================
+抽取规则：
 
-只输出JSON，无其他内容。` },
+【1. 菜名识别】
+- 优先提取最大标题
+- 若无明确标题，使用第一行文本
+- 去除表情符号和营销词
+
+【2. 食材ID生成规则】
+- 为每个食材生成唯一ID，格式：ing_食材拼音或英文
+- 例如：盐 → ing_salt, 食用油 → ing_oil, 鸡蛋 → ing_egg
+- ID必须全小写，用下划线连接
+
+【3. 食材总量计算（核心规则！）】
+- ingredients中的amount是该食材在整道菜中的总用量
+- **重要：总用量 = 所有步骤中该食材用量之和**
+- 例如：葱在步骤1用5克，步骤2用10克，步骤3用5克，则总量为20克
+- 如果某食材在多个步骤中使用，必须累加所有步骤的用量
+- scalable字段：主料和主要调料填true，装饰性食材填false
+
+【4. 步骤食材用量（核心规则！）】
+- 每个步骤的ingredients数组列出该步骤实际使用的食材及用量
+- ingredientId必须对应ingredients中的id
+- **amount是该步骤使用的具体用量，不是总量**
+- **关键：同一食材在多个步骤中的用量相加，必须等于ingredients中的总量**
+- 如果步骤中未明确用量，根据常识合理分配到各步骤
+- 例如：总量20克葱，分3个步骤使用，可以分配为：步骤1用5克，步骤2用10克，步骤3用5克
+
+【5. 步骤描述规则】
+- 步骤描述保持原样，不要添加或修改任何内容
+- 不要在步骤中添加食材用量信息
+- 保持步骤描述简洁清晰
+
+【6. 纯提取原则（重要！）】
+- 只提取图片中明确存在的信息
+- 不确定的 amount 填 0
+- 不确定的 duration 填 0
+- 不确定的 totalTime 填 0
+- 不做任何智能估算或补充
+
+====================
+重要约束：
+- 这是纯信息抽取任务，不是优化任务
+- 禁止编造图片中不存在的信息
+- 不确定的内容填0，不要估算
+- 严禁输出解释、注释、Markdown、额外字段
+- 只输出一个合法JSON对象
+
+现在开始输出最终JSON：` },
             { type: "image_url", image_url: { url: imageUrl } },
           ],
         },
