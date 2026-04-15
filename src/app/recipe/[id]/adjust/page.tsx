@@ -14,6 +14,7 @@ import {
   DIFFICULTY_LABELS,
 } from "@/lib/optimizeService";
 import { optimizeRecipeFromLogs, OptimizedRecipeFromLogs } from "@/lib/doubao";
+import { saveOptimizedRecipe } from "@/lib/recipe-adjustment-service";
 
 export default function SmartAdjustPage() {
   const params = useParams();
@@ -104,25 +105,76 @@ export default function SmartAdjustPage() {
     }
   }
 
-  function handleSaveVersion() {
-    if (!optimizedRecipe) return;
+  async function handleSaveVersion() {
+    if (!optimizedRecipe || !currentRecipe) return;
     
     setSaving(true);
     
-    const versionData = {
-      name: optimizedRecipe.name,
-      recipe: optimizedRecipe,
-      basedOnLogs: logs.length,
-      createdAt: new Date().toISOString(),
-      adjustmentSummary: optimizedRecipe.adjustmentSummary,
-    };
-    
-    localStorage.setItem(`my-version-${recipeId}`, JSON.stringify(versionData));
-    
-    setTimeout(() => {
+    try {
+      // 确保所有食材和步骤都被保留
+      const completeIngredients = currentRecipe.ingredients.map(originalIng => {
+        const adjustedIng = optimizedRecipe.ingredients.find(adj => adj.id === originalIng.id);
+        if (adjustedIng) {
+          return {
+            id: originalIng.id,
+            name: originalIng.name,
+            original_amount: originalIng.amount,
+            original_unit: originalIng.unit,
+            adjusted_amount: adjustedIng.adjusted_amount,
+            adjusted_unit: adjustedIng.adjusted_unit,
+            change_reason: adjustedIng.change_reason
+          };
+        }
+        // 如果没有调整，保留原始值
+        return {
+          id: originalIng.id,
+          name: originalIng.name,
+          original_amount: originalIng.amount,
+          original_unit: originalIng.unit,
+          adjusted_amount: originalIng.amount,
+          adjusted_unit: originalIng.unit,
+          change_reason: undefined
+        };
+      });
+
+      const completeSteps = currentRecipe.steps.map(originalStep => {
+        const adjustedStep = optimizedRecipe.steps.find(adj => adj.order === originalStep.order);
+        if (adjustedStep) {
+          return {
+            order: originalStep.order,
+            description: adjustedStep.description || originalStep.description,
+            duration: adjustedStep.duration ?? originalStep.duration,
+            ingredients: adjustedStep.ingredients || originalStep.ingredients,
+            tip: adjustedStep.tip || originalStep.tip,
+            changes: adjustedStep.changes
+          };
+        }
+        // 如果没有调整，保留原始值
+        return {
+          order: originalStep.order,
+          description: originalStep.description,
+          duration: originalStep.duration,
+          ingredients: originalStep.ingredients,
+          tip: originalStep.tip,
+          changes: undefined
+        };
+      });
+      
+      await saveOptimizedRecipe(recipeId, {
+        name: optimizedRecipe.name,
+        total_time: optimizedRecipe.totalTime,
+        ingredients: completeIngredients,
+        steps: completeSteps,
+        adjustment_summary: optimizedRecipe.adjustmentSummary,
+        based_on_logs_count: logs.length,
+      });
+      
       setSaving(false);
       router.push(`/recipe/${recipeId}`);
-    }, 500);
+    } catch (error) {
+      console.error("Failed to save version:", error);
+      setSaving(false);
+    }
   }
 
   if (loading) {

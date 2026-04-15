@@ -8,7 +8,7 @@ import {
   Sparkles, RefreshCw, AlertCircle, Send, ChevronUp, ChevronDown
 } from "lucide-react";
 import { getRecipe, deleteRecipe, Recipe, Ingredient, getCookingLogs, calculateAverageRating, CookingLog } from "@/lib/supabase";
-import { getOptimizedRecipe } from "@/lib/recipe-adjustment-service";
+import { getOptimizedRecipe, saveOptimizedRecipe, deleteOptimizedRecipe } from "@/lib/recipe-adjustment-service";
 import { queryIngredientSubstitution, IngredientSubstitutionQueryResult, IngredientSubstitutionSuggestion } from "@/lib/doubao";
 import { useRecipeStore, useCookingStore } from "@/store";
 import AIProactiveTip from "@/components/AIProactiveTip";
@@ -82,6 +82,8 @@ export default function RecipeDetailPage() {
   const [myVersionRecipe, setMyVersionRecipe] = useState<Recipe | null>(null);
   const [originalRecipe, setOriginalRecipe] = useState<Recipe | null>(null);
   const [showOptimizationDetails, setShowOptimizationDetails] = useState(false);
+  const [resettingVersion, setResettingVersion] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
   
   const lastLoadedRecipeId = useRef<string | null>(null);
 
@@ -208,6 +210,51 @@ export default function RecipeDetailPage() {
       setDeleting(false);
       setShowDeleteConfirm(false);
       setShowMenu(false);
+    }
+  }
+
+  async function handleResetMyVersion() {
+    if (!originalRecipe) return;
+    
+    setResettingVersion(true);
+    setShowResetConfirm(false);
+    
+    try {
+      // 将原始食谱保存为我的版本
+      const ingredients = originalRecipe.ingredients.map(ing => ({
+        id: ing.id,
+        name: ing.name,
+        original_amount: ing.amount,
+        original_unit: ing.unit,
+        adjusted_amount: ing.amount,
+        adjusted_unit: ing.unit,
+        change_reason: undefined
+      }));
+      
+      const steps = originalRecipe.steps.map(step => ({
+        order: step.order,
+        description: step.description,
+        duration: step.duration,
+        ingredients: step.ingredients,
+        tip: step.tip,
+        changes: undefined
+      }));
+      
+      await saveOptimizedRecipe(recipeId, {
+        name: originalRecipe.name,
+        total_time: originalRecipe.total_time,
+        ingredients,
+        steps,
+        adjustment_summary: "已重置为原始版本",
+        based_on_logs_count: 0,
+      });
+      
+      // 重新加载数据
+      await loadRecipe();
+    } catch (error) {
+      console.error("Failed to reset version:", error);
+    } finally {
+      setResettingVersion(false);
     }
   }
 
@@ -492,22 +539,31 @@ export default function RecipeDetailPage() {
           </div>
           {currentVersion === "my" && myVersionSummary && (
             <div className="mt-2">
-              <button
-                onClick={() => setShowOptimizationDetails(!showOptimizationDetails)}
-                className="flex items-center gap-1 text-xs text-primary-600 hover:text-primary-700"
-              >
-                {showOptimizationDetails ? (
-                  <>
-                    <ChevronUp className="w-3 h-3" />
-                    收起优化说明
-                  </>
-                ) : (
-                  <>
-                    <ChevronDown className="w-3 h-3" />
-                    查看优化说明
-                  </>
-                )}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowOptimizationDetails(!showOptimizationDetails)}
+                  className="flex items-center gap-1 text-xs text-primary-600 hover:text-primary-700"
+                >
+                  {showOptimizationDetails ? (
+                    <>
+                      <ChevronUp className="w-3 h-3" />
+                      收起优化说明
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown className="w-3 h-3" />
+                      查看优化说明
+                    </>
+                  )}
+                </button>
+                <button
+                  onClick={() => setShowResetConfirm(true)}
+                  className="flex items-center gap-1 text-xs text-red-500 hover:text-red-600"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  重置我的版本
+                </button>
+              </div>
               {showOptimizationDetails && (
                 <div className="mt-2 p-2 bg-primary-50 rounded-lg">
                   <p className="text-xs text-primary-700">
@@ -969,6 +1025,30 @@ export default function RecipeDetailPage() {
                 className="flex-1 py-3 rounded-xl bg-red-500 text-white font-medium disabled:opacity-50"
               >
                 {deleting ? "删除中..." : "确认删除"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showResetConfirm && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-sm w-full">
+            <h3 className="text-lg font-semibold mb-2">重置我的版本</h3>
+            <p className="text-gray-500 mb-6">确定要将"我的版本"重置为原始版本吗？这将覆盖当前的优化内容。</p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowResetConfirm(false)}
+                className="flex-1 py-3 rounded-xl bg-gray-100 text-gray-700 font-medium"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleResetMyVersion}
+                disabled={resettingVersion}
+                className="flex-1 py-3 rounded-xl bg-primary-500 text-white font-medium disabled:opacity-50"
+              >
+                {resettingVersion ? "重置中..." : "确认重置"}
               </button>
             </div>
           </div>

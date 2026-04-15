@@ -564,12 +564,12 @@ ${text}
       return [
         {
           role: "system",
-          content: `你是烹饪优化助手。基于用户历史做菜记录，分析口味偏好和重复问题，输出优化建议。
+          content: `你是烹饪优化助手。基于用户历史做菜记录，分析问题并提供改进建议。
 
-规则：
-1. 关注重复出现的问题，忽略偶发问题
-2. 区分稳定偏好和偶发问题
-3. 输出JSON，无额外文字`,
+核心规则：
+1. 只展示分析和建议，不要主动建议生成优化版本
+2. 重点关注重复出现的问题
+3. 输出完整的JSON结构，不要遗漏任何字段`,
         },
         {
           role: "user",
@@ -579,17 +579,19 @@ ${text}
 食材：${JSON.stringify(recipe?.ingredients || [])}
 历史记录(${historyCount}条)：${JSON.stringify(historyRecords)}
 
-输出JSON：
+输出完整的JSON结构（所有字段都要保留）：
 {
-  "should_generate_optimized_version": true,
+  "should_generate_optimized_version": false,
   "confidence": "high",
-  "summary": {"title": "标题", "text": "摘要"},
+  "analysis_stability": "high",
+  "history_count": ${historyCount},
+  "summary": {"title": "分析摘要", "text": "简要总结"},
   "problems": [{"code": "too_spicy", "label": "太辣", "frequency": 3, "evidence_strength": "high", "category": "stable"}],
   "preferences": [{"code": "less_spicy", "label": "偏少辣", "type": "flavor", "evidence_strength": "high"}],
-  "suggestions": [{"title": "建议", "detail": "详情", "priority": "high"}],
-  "adjustment_direction": {"flavor_profile": "调味方向", "ingredient_adjustment": ["调整1"], "heat_adjustment": ["调整1"]},
-  "generation_reason": "原因",
-  "ui_recommendation": {"primary_button_text": "按钮文案", "secondary_button_text": "次按钮文案"}
+  "suggestions": [{"title": "建议标题", "detail": "建议详情", "priority": "high"}],
+  "adjustment_direction": {"flavor_profile": "", "ingredient_adjustment": [], "heat_adjustment": []},
+  "generation_reason": "",
+  "ui_recommendation": {"primary_button_text": "", "secondary_button_text": ""}
 }`,
         },
       ];
@@ -598,26 +600,38 @@ ${text}
       return [
         {
           role: "system",
-          content: "你是食谱优化引擎。基于用户做菜反馈，调整食谱用量和步骤。",
+          content: "你是食谱优化引擎。基于用户做菜反馈，调整食谱用量和步骤。重要规则：\n1. 必须完整保留原始食谱的所有食材和所有步骤！\n2. 只对需要调整的食材进行修改，其他食材原样保留\n3. 只对需要调整的步骤进行修改，其他步骤原样保留\n4. 必须返回完整的食谱结构，不要遗漏任何食材或步骤",
         },
         {
           role: "user",
-          content: `优化食谱，返回JSON：
+          content: `优化食谱，返回完整的JSON：
 
-食谱：${JSON.stringify(recipe)}
+原始食谱（完整结构）：${JSON.stringify(recipe)}
 历史记录(${(cookingLogs as any[])?.length || 0}条)：${JSON.stringify(cookingLogs)}
+
+重要规则（必须遵守）：
+1. 必须完整保留原始食谱的所有食材和所有步骤！
+2. 只对需要调整的食材进行修改，其他食材原样保留
+3. 只对需要调整的步骤进行修改，其他步骤原样保留
+4. 必须返回完整的食谱结构，不要遗漏任何食材或步骤
 
 调整规则：
 - rating 1-2：大幅调整；3：适度调整；4-5：微调
 - too_spicy：减辣30-50%；too_salty：减盐20-30%；too_oily：减油30-50%
 - heat_hard：添加火候提示；step_unclear：优化步骤描述
 
-输出：
+输出（必须完整返回所有食材和步骤）：
 {
   "name": "我的版本",
   "totalTime": 30,
-  "ingredients": [{"id": "id", "name": "名", "original_amount": 10, "original_unit": "克", "adjusted_amount": 8, "adjusted_unit": "克"}],
-  "steps": [{"order": 1, "description": "步骤", "duration": 5, "tip": "提示"}],
+  "ingredients": [
+    {"id": "ing_1", "name": "食材1", "original_amount": 10, "original_unit": "克", "adjusted_amount": 8, "adjusted_unit": "克", "change_reason": "调整原因"},
+    {"id": "ing_2", "name": "食材2（未修改）", "original_amount": 5, "original_unit": "个", "adjusted_amount": 5, "adjusted_unit": "个"}
+  ],
+  "steps": [
+    {"order": 1, "description": "步骤1", "duration": 5, "tip": "提示", "ingredients": [...]},
+    {"order": 2, "description": "步骤2（未修改）", "duration": 10, "ingredients": [...]}
+  ],
   "adjustmentSummary": "优化说明"
 }`,
         },

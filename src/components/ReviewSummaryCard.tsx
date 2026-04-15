@@ -228,56 +228,6 @@ export default function ReviewSummaryCard({
               </div>
             ) : analysis && (
               <>
-                <div className="mb-3 p-3 bg-white/10 rounded-xl">
-                  <div className="flex items-start gap-2">
-                    <TrendingUp className="w-4 h-4 text-white/80 mt-0.5 flex-shrink-0" />
-                    <div>
-                      <p className="text-white text-sm font-medium mb-1">
-                        {analysis.summary.title}
-                      </p>
-                      <p className="text-white/80 text-xs">
-                        {analysis.summary.text}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-                
-                {analysis.problems.length > 0 && (
-                  <div className="mb-3">
-                    <div className="flex items-center gap-1 mb-2">
-                      <Lightbulb className="w-3 h-3 text-yellow-300" />
-                      <span className="text-white/90 text-xs">发现的问题</span>
-                    </div>
-                    <div className="flex flex-wrap gap-1">
-                      {analysis.problems.filter(p => p.category === "stable").map((item, index) => (
-                        <span
-                          key={index}
-                          className="px-3 py-1.5 bg-white/20 text-white rounded-full text-sm"
-                        >
-                          {item.label}
-                          {item.frequency && ` (${item.frequency}次)`}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                
-                {analysis.preferences.length > 0 && (
-                  <div className="mb-3">
-                    <p className="text-white/90 text-xs mb-2">你的口味偏好：</p>
-                    <div className="flex flex-wrap gap-1">
-                      {analysis.preferences.map((pref, index) => (
-                        <span 
-                          key={index}
-                          className="px-2 py-1 bg-white/15 text-white rounded-full text-xs"
-                        >
-                          {pref.label}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                
                 {analysis.suggestions.length > 0 && (
                   <div className="mb-3">
                     <p className="text-white/90 text-xs mb-2">改进建议：</p>
@@ -295,31 +245,24 @@ export default function ReviewSummaryCard({
                   </div>
                 )}
                 
-                {analysis.should_generate_optimized_version ? (
-                  <button
-                    onClick={handleGenerateOptimizedVersion}
-                    disabled={generating}
-                    className="w-full py-3 bg-white text-primary-600 rounded-xl font-medium hover:bg-white/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-                  >
-                    {generating ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        正在生成优化版...
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles className="w-4 h-4" />
-                        {analysis.ui_recommendation.primary_button_text}
-                      </>
-                    )}
-                  </button>
-                ) : (
-                  <div className="text-center">
-                    <p className="text-xs text-white/70 mb-2">
-                      {analysis.generation_reason}
-                    </p>
-                  </div>
-                )}
+                {/* 手动生成优化版本的按钮 */}
+                <button
+                  onClick={handleGenerateOptimizedVersion}
+                  disabled={generating}
+                  className="w-full py-3 bg-white text-primary-600 rounded-xl font-medium hover:bg-white/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {generating ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      正在生成优化版...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-4 h-4" />
+                      生成优化版本
+                    </>
+                  )}
+                </button>
               </>
             )}
           </div>
